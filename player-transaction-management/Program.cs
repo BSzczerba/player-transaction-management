@@ -1,9 +1,11 @@
+using Application.Interfaces;
+using FluentValidation;
 using Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using System.Text;
 using Serilog;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -109,8 +111,17 @@ builder.Services.AddCors(options =>
 // Add AutoMapper
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 
+// Add FluentValidation
+builder.Services.AddValidatorsFromAssemblyContaining<Application.Validators.RegisterDtoValidator>();
+
+// Register Repositories and Unit of Work
+builder.Services.AddScoped<Application.Repositories.Interfaces.IUnitOfWork, Infrastructure.Repositories.Implementations.UnitOfWork>();
+
 // Register Application Services
-// TODO: Add service registrations here
+builder.Services.AddScoped<Application.Services.Interfaces.IAuthService, Application.Services.Implementations.AuthService>();
+
+
+builder.Services.AddScoped<IPasswordHasher, Infrastructure.Services.BcryptPasswordHasher>();
 
 var app = builder.Build();
 
@@ -142,6 +153,9 @@ if (app.Environment.IsDevelopment())
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     dbContext.Database.Migrate();
+
+    // Seed initial data
+    await DatabaseSeeder.SeedAsync(dbContext);
 }
 
 try
