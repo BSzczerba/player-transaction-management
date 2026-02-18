@@ -1,4 +1,7 @@
 using Application.Interfaces;
+using Application.Services;
+using Application.Services.Implementations;
+using Application.Services.Interfaces;
 using FluentValidation;
 using Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -109,7 +112,7 @@ builder.Services.AddCors(options =>
 });
 
 // Add AutoMapper
-builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
+builder.Services.AddAutoMapper(typeof(Application.Mappings.MappingProfile).Assembly);
 
 // Add FluentValidation
 builder.Services.AddValidatorsFromAssemblyContaining<Application.Validators.RegisterDtoValidator>();
@@ -118,8 +121,9 @@ builder.Services.AddValidatorsFromAssemblyContaining<Application.Validators.Regi
 builder.Services.AddScoped<Application.Repositories.Interfaces.IUnitOfWork, Infrastructure.Repositories.Implementations.UnitOfWork>();
 
 // Register Application Services
-builder.Services.AddScoped<Application.Services.Interfaces.IAuthService, Application.Services.Implementations.AuthService>();
-
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<ITransactionService, TransactionService>();
+builder.Services.AddScoped<IPlayerService, PlayerService>();
 
 builder.Services.AddScoped<IPasswordHasher, Infrastructure.Services.BcryptPasswordHasher>();
 
@@ -132,7 +136,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "Player Transaction Management API v1");
-        options.RoutePrefix = string.Empty; // Swagger at root
+        options.RoutePrefix = "swagger";
     });
 }
 
