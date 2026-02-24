@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Application.Interfaces;
 using Application.Repositories.Interfaces;
 using Application.Services.Interfaces;
@@ -37,6 +37,8 @@ public class AuthService : IAuthService
         if (await _uow.Players.UsernameExistsAsync(dto.Username, ct))
             throw new InvalidOperationException("Username already taken.");
 
+        var activationToken = Guid.NewGuid().ToString("N");
+
         var player = new Player
         {
             Email = dto.Email.ToLowerInvariant(),
@@ -47,13 +49,19 @@ public class AuthService : IAuthService
             PhoneNumber = dto.PhoneNumber,
             DateOfBirth = dto.DateOfBirth,
             Role = UserRole.Player,
-            Status = AccountStatus.PendingVerification
+            Status = AccountStatus.PendingVerification,
+            ActivationToken = activationToken,
+            ActivationTokenExpiry = DateTime.UtcNow.AddHours(24)
         };
 
         await _uow.Players.AddAsync(player, ct);
         await _uow.SaveChangesAsync(ct);
 
-        return BuildAuthResponse(player);
+        var response = BuildAuthResponse(player);
+        // Return the activation token in the response so the caller can simulate the email flow.
+        // In production this would be sent via email and NOT included in the API response.
+        response.ActivationToken = activationToken;
+        return response;
     }
 
     // ─── Login ───────────────────────────────────────────────────────────────
@@ -73,20 +81,77 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("Account is closed.");
 
         player.LastLoginAt = DateTime.UtcNow;
+        StoreRefreshToken(player);
         _uow.Players.Update(player);
         await _uow.SaveChangesAsync(ct);
 
         return BuildAuthResponse(player);
     }
 
-    // ─── RefreshToken (placeholder) ──────────────────────────────────────────
-    public Task<AuthResponseDto> RefreshTokenAsync(RefreshTokenDto refreshTokenDto, CancellationToken cancellationToken = default)
+    // ─── RefreshToken ────────────────────────────────────────────────────────
+    public async Task<AuthResponseDto> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken ct = default)
     {
-        throw new NotSupportedException("Refresh token flow not implemented. Implement persistent refresh tokens before using this method.");
+        // Validate JWT structure — allow expired tokens but reject invalid signatures
+        ClaimsPrincipal principal;
+        try
+        {
+            principal = new JwtSecurityTokenHandler()
+                .ValidateToken(dto.Token, TokenValidationParams(validateLifetime: false), out _);
+        }
+        catch
+        {
+            throw new UnauthorizedAccessException("Invalid access token.");
+        }
+
+        var userIdValue = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(userIdValue, out var playerId))
+            throw new UnauthorizedAccessException("Invalid token claims.");
+
+        var player = await _uow.Players.GetByIdAsync(playerId, ct)
+            ?? throw new UnauthorizedAccessException("Player not found.");
+
+        if (player.RefreshToken != dto.RefreshToken ||
+            player.RefreshTokenExpiry is null ||
+            player.RefreshTokenExpiry <= DateTime.UtcNow)
+        {
+            throw new UnauthorizedAccessException("Refresh token is invalid or has expired.");
+        }
+
+        StoreRefreshToken(player);
+        _uow.Players.Update(player);
+        await _uow.SaveChangesAsync(ct);
+
+        return BuildAuthResponse(player);
+    }
+
+    // ─── ActivateAccount ─────────────────────────────────────────────────────
+    public async Task<bool> ActivateAccountAsync(string token, CancellationToken ct = default)
+    {
+        var player = await _uow.Players.FirstOrDefaultAsync(
+            p => p.ActivationToken == token, ct);
+
+        if (player is null)
+            throw new InvalidOperationException("Invalid activation token.");
+
+        if (player.ActivationTokenExpiry is null || player.ActivationTokenExpiry <= DateTime.UtcNow)
+            throw new InvalidOperationException("Activation token has expired. Please request a new one.");
+
+        if (player.Status == AccountStatus.Active)
+            throw new InvalidOperationException("Account is already active.");
+
+        player.Status = AccountStatus.Active;
+        player.EmailVerified = true;
+        player.ActivationToken = null;
+        player.ActivationTokenExpiry = null;
+
+        _uow.Players.Update(player);
+        await _uow.SaveChangesAsync(ct);
+
+        return true;
     }
 
     // ─── ValidateToken ────────────────────────────────────────────────────────
-    public Task<bool> ValidateTokenAsync(string token, CancellationToken cancellationToken = default)
+    public Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
     {
         try
         {
@@ -103,15 +168,24 @@ public class AuthService : IAuthService
     private AuthResponseDto BuildAuthResponse(Player player)
     {
         var (token, expires) = GenerateJwt(player);
-        var refreshToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
 
         return new AuthResponseDto
         {
             Token = token,
-            RefreshToken = refreshToken,
+            RefreshToken = player.RefreshToken ?? string.Empty,
             ExpiresAt = expires,
             User = _mapper.Map<PlayerDto>(player)
         };
+    }
+
+    /// <summary>
+    /// Generates a new opaque refresh token and persists it in the player entity.
+    /// NOTE: In production the token should be hashed before storage (e.g. SHA-256).
+    /// </summary>
+    private static void StoreRefreshToken(Player player)
+    {
+        player.RefreshToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+        player.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
     }
 
     private (string Token, DateTime Expires) GenerateJwt(Player player)
@@ -145,7 +219,7 @@ public class AuthService : IAuthService
         return (handler.WriteToken(handler.CreateToken(descriptor)), expiry);
     }
 
-    private TokenValidationParameters TokenValidationParams() => new()
+    private TokenValidationParameters TokenValidationParams(bool validateLifetime = true) => new()
     {
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret())),
@@ -153,7 +227,7 @@ public class AuthService : IAuthService
         ValidIssuer = _config["JwtSettings:Issuer"],
         ValidateAudience = true,
         ValidAudience = _config["JwtSettings:Audience"],
-        ValidateLifetime = true,
+        ValidateLifetime = validateLifetime,
         ClockSkew = TimeSpan.Zero
     };
 

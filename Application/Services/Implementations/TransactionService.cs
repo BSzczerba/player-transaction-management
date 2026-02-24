@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Application.Services.Interfaces;
 using Application.Repositories.Interfaces;
 using AutoMapper;
@@ -9,8 +9,8 @@ using Microsoft.Extensions.Logging;
 namespace Application.Services.Implementations;
 
 /// <summary>
-/// Serwis zarządzający transakcjami - wpłaty, wypłaty, zatwierdzanie.
-/// Zawiera pełną logikę biznesową: walidacja limitów, AML, audyt.
+/// Service responsible for transaction management - deposits, withdrawals, approvals.
+/// Contains full business logic: limit validation, AML detection, audit logging.
 /// </summary>
 public class TransactionService : ITransactionService
 {
@@ -26,7 +26,7 @@ public class TransactionService : ITransactionService
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // DEPOSIT (wpłata)
+    // DEPOSIT
     // ═══════════════════════════════════════════════════════════════════════════
     public async Task<TransactionDto> CreateDepositAsync(
         Guid playerId,
@@ -37,23 +37,19 @@ public class TransactionService : ITransactionService
         var player = await _uow.Players.GetByIdAsync(playerId, ct)
             ?? throw new InvalidOperationException("Player not found.");
 
-        // Sprawdź status konta
         if (player.Status != AccountStatus.Active)
             throw new InvalidOperationException($"Account status is {player.Status}. Cannot deposit.");
 
-        // Sprawdź metodę płatności
         var paymentMethod = await _uow.PaymentMethods.GetByIdAsync(dto.PaymentMethodId, ct)
             ?? throw new InvalidOperationException("Payment method not found.");
 
         if (!paymentMethod.IsActive)
             throw new InvalidOperationException("Payment method is not active.");
 
-        // Walidacja kwoty (min/max metody płatności)
         if (dto.Amount < paymentMethod.MinAmount || dto.Amount > paymentMethod.MaxAmount)
             throw new InvalidOperationException(
                 $"Amount must be between {paymentMethod.MinAmount} and {paymentMethod.MaxAmount}.");
 
-        // Sprawdź dzienny limit depozytów
         var depositToday = (await _uow.Transactions.GetTodaysTransactionsByPlayerAsync(playerId, ct))
             .Where(t => t.Type == TransactionType.Deposit)
             .Sum(t => t.Amount);
@@ -62,7 +58,6 @@ public class TransactionService : ITransactionService
                 $"Daily deposit limit exceeded. Limit: {player.DailyDepositLimit}, " +
                 $"already deposited today: {depositToday}.");
 
-        // Utwórz transakcję
         var transaction = new Transaction
         {
             PlayerId = playerId,
@@ -73,37 +68,42 @@ public class TransactionService : ITransactionService
             Description = dto.Description,
             IpAddress = ipAddress,
             BalanceBefore = player.Balance,
-            BalanceAfter = player.Balance + dto.Amount  // przewidywane
+            BalanceAfter = player.Balance + dto.Amount
         };
 
-        // Wpłaty < 100 automatycznie zatwierdzane, większe wymagają przeglądu
+        // AML check applies to deposits as well
+        var (isSuspicious, flagReason) = await DetectSuspiciousActivity(playerId, dto.Amount, TransactionType.Deposit, ct);
+        if (isSuspicious)
+        {
+            transaction.IsFlagged = true;
+            transaction.FlagReason = flagReason;
+            _log.LogWarning("Suspicious deposit detected for player {PlayerId}: {Amount}", playerId, dto.Amount);
+        }
+
+        // Deposits < 100 are auto-approved; larger deposits require manual review
         if (dto.Amount < 100m)
         {
             transaction.Status = TransactionStatus.Completed;
             transaction.CompletedAt = DateTime.UtcNow;
             player.Balance += dto.Amount;
             _uow.Players.Update(player);
-
-            _log.LogInformation("Auto-approved deposit of {Amount} for player {PlayerId}",
-                dto.Amount, playerId);
+            _log.LogInformation("Auto-approved deposit of {Amount} for player {PlayerId}", dto.Amount, playerId);
         }
         else
         {
-            _log.LogInformation("Deposit of {Amount} for player {PlayerId} pending approval",
-                dto.Amount, playerId);
+            _log.LogInformation("Deposit of {Amount} for player {PlayerId} pending approval", dto.Amount, playerId);
         }
 
         await _uow.Transactions.AddAsync(transaction, ct);
         await _uow.SaveChangesAsync(ct);
 
-        // Audit log
         await CreateAuditLog("CreateDeposit", playerId, transaction.Id, ipAddress, ct);
 
         return _mapper.Map<TransactionDto>(transaction);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // WITHDRAWAL (wypłata)
+    // WITHDRAWAL
     // ═══════════════════════════════════════════════════════════════════════════
     public async Task<TransactionDto> CreateWithdrawalAsync(
         Guid playerId,
@@ -114,32 +114,26 @@ public class TransactionService : ITransactionService
         var player = await _uow.Players.GetByIdAsync(playerId, ct)
             ?? throw new InvalidOperationException("Player not found.");
 
-        // Sprawdź status konta
         if (player.Status != AccountStatus.Active)
             throw new InvalidOperationException($"Account status is {player.Status}. Cannot withdraw.");
 
-        // Weryfikacja KYC wymagana do wypłat
         if (!player.KycVerified)
             throw new InvalidOperationException("KYC verification required for withdrawals.");
 
-        // Sprawdź metodę płatności
         var paymentMethod = await _uow.PaymentMethods.GetByIdAsync(dto.PaymentMethodId, ct)
             ?? throw new InvalidOperationException("Payment method not found.");
 
         if (!paymentMethod.IsActive)
             throw new InvalidOperationException("Payment method is not active.");
 
-        // Walidacja kwoty
         if (dto.Amount < paymentMethod.MinAmount || dto.Amount > paymentMethod.MaxAmount)
             throw new InvalidOperationException(
                 $"Amount must be between {paymentMethod.MinAmount} and {paymentMethod.MaxAmount}.");
 
-        // Sprawdź czy ma wystarczający balans
         if (player.Balance < dto.Amount)
             throw new InvalidOperationException(
                 $"Insufficient balance. Available: {player.Balance}, requested: {dto.Amount}.");
 
-        // Sprawdź dzienny limit wypłat
         var withdrawalToday = (await _uow.Transactions.GetTodaysTransactionsByPlayerAsync(playerId, ct))
             .Where(t => t.Type == TransactionType.Withdrawal)
             .Sum(t => t.Amount);
@@ -148,7 +142,6 @@ public class TransactionService : ITransactionService
                 $"Daily withdrawal limit exceeded. Limit: {player.DailyWithdrawalLimit}, " +
                 $"already withdrawn today: {withdrawalToday}.");
 
-        // Utwórz transakcję (zawsze wymaga zatwierdzenia)
         var transaction = new Transaction
         {
             PlayerId = playerId,
@@ -159,33 +152,29 @@ public class TransactionService : ITransactionService
             Description = dto.Description,
             IpAddress = ipAddress,
             BalanceBefore = player.Balance,
-            BalanceAfter = player.Balance - dto.Amount  // przewidywane
+            BalanceAfter = player.Balance - dto.Amount
         };
 
-        // Wykrywanie podejrzanych wzorców (prosty AML)
-        var isSuspicious = await DetectSuspiciousActivity(playerId, dto.Amount, ct);
+        var (isSuspicious, flagReason) = await DetectSuspiciousActivity(playerId, dto.Amount, TransactionType.Withdrawal, ct);
         if (isSuspicious)
         {
             transaction.IsFlagged = true;
-            transaction.FlagReason = "Unusual withdrawal pattern detected. Manual review required.";
-            _log.LogWarning("Suspicious withdrawal detected for player {PlayerId}: {Amount}",
-                playerId, dto.Amount);
+            transaction.FlagReason = flagReason;
+            _log.LogWarning("Suspicious withdrawal detected for player {PlayerId}: {Amount}", playerId, dto.Amount);
         }
 
         await _uow.Transactions.AddAsync(transaction, ct);
         await _uow.SaveChangesAsync(ct);
 
-        // Audit log
         await CreateAuditLog("CreateWithdrawal", playerId, transaction.Id, ipAddress, ct);
 
-        _log.LogInformation("Withdrawal of {Amount} for player {PlayerId} pending approval",
-            dto.Amount, playerId);
+        _log.LogInformation("Withdrawal of {Amount} for player {PlayerId} pending approval", dto.Amount, playerId);
 
         return _mapper.Map<TransactionDto>(transaction);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // APPROVE (zatwierdzanie przez operatora)
+    // APPROVE
     // ═══════════════════════════════════════════════════════════════════════════
     public async Task<TransactionDto> ApproveAsync(
         Guid transactionId,
@@ -203,12 +192,10 @@ public class TransactionService : ITransactionService
         var player = await _uow.Players.GetByIdAsync(transaction.PlayerId, ct)
             ?? throw new InvalidOperationException("Player not found.");
 
-        // Dla depozytów: dodaj do balansu
         if (transaction.Type == TransactionType.Deposit)
         {
             player.Balance += transaction.Amount;
         }
-        // Dla wypłat: odejmij od balansu
         else if (transaction.Type == TransactionType.Withdrawal)
         {
             if (player.Balance < transaction.Amount)
@@ -218,7 +205,6 @@ public class TransactionService : ITransactionService
             player.Balance -= transaction.Amount;
         }
 
-        // Aktualizuj transakcję
         transaction.Status = TransactionStatus.Completed;
         transaction.CompletedAt = DateTime.UtcNow;
         transaction.ApprovedById = operatorId;
@@ -232,10 +218,8 @@ public class TransactionService : ITransactionService
         _uow.Players.Update(player);
         await _uow.SaveChangesAsync(ct);
 
-        // Audit log
         await CreateAuditLog("ApproveTransaction", operatorId, transactionId, null, ct);
 
-        // Powiadomienie do gracza
         await CreateNotification(
             player.Id,
             "Transaction Approved",
@@ -250,7 +234,7 @@ public class TransactionService : ITransactionService
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // REJECT (odrzucanie)
+    // REJECT
     // ═══════════════════════════════════════════════════════════════════════════
     public async Task<TransactionDto> RejectAsync(
         Guid transactionId,
@@ -273,10 +257,8 @@ public class TransactionService : ITransactionService
         _uow.Transactions.Update(transaction);
         await _uow.SaveChangesAsync(ct);
 
-        // Audit log
         await CreateAuditLog("RejectTransaction", operatorId, transactionId, null, ct);
 
-        // Powiadomienie do gracza
         await CreateNotification(
             transaction.PlayerId,
             "Transaction Rejected",
@@ -291,7 +273,7 @@ public class TransactionService : ITransactionService
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // QUERIES (zapytania)
+    // QUERIES
     // ═══════════════════════════════════════════════════════════════════════════
     public async Task<TransactionDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
@@ -305,40 +287,66 @@ public class TransactionService : ITransactionService
         return _mapper.Map<IEnumerable<TransactionDto>>(transactions);
     }
 
+    public async Task<PagedResult<TransactionDto>> GetByPlayerPagedAsync(
+        Guid playerId, int page, int pageSize, CancellationToken ct = default)
+    {
+        var filter = new TransactionFilterDto
+        {
+            PlayerId = playerId,
+            Page = page,
+            PageSize = pageSize
+        };
+        return await GetAllAsync(filter, ct);
+    }
+
     public async Task<IEnumerable<TransactionDto>> GetPendingAsync(CancellationToken ct = default)
     {
         var transactions = await _uow.Transactions.GetPendingTransactionsAsync(ct);
         return _mapper.Map<IEnumerable<TransactionDto>>(transactions);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // HELPERS (metody pomocnicze)
-    // ═══════════════════════════════════════════════════════════════════════════
-    private async Task<bool> DetectSuspiciousActivity(Guid playerId, decimal amount, CancellationToken ct)
+    public async Task<PagedResult<TransactionDto>> GetAllAsync(
+        TransactionFilterDto filter, CancellationToken ct = default)
     {
-        // Prosty algorytm AML - w produkcji byłby o wiele bardziej zaawansowany
-        var recentTransactions = await _uow.Transactions.GetByPlayerIdAsync(playerId, ct);
-        var last24h = recentTransactions
-            .Where(t => t.CreatedAt >= DateTime.UtcNow.AddHours(-24))
-            .ToList();
+        var (items, totalCount) = await _uow.Transactions.GetFilteredAsync(filter, ct);
+        var pageSize = Math.Clamp(filter.PageSize, 1, 100);
 
-        // Red flag 1: więcej niż 5 transakcji w ciągu 24h
+        return new PagedResult<TransactionDto>
+        {
+            Items = _mapper.Map<IEnumerable<TransactionDto>>(items),
+            TotalCount = totalCount,
+            Page = filter.Page,
+            PageSize = pageSize
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// AML detection — uses a 24-hour rolling window query translated to SQL.
+    /// Returns a flag reason string for transparency in audit trail.
+    /// </summary>
+    private async Task<(bool IsSuspicious, string Reason)> DetectSuspiciousActivity(
+        Guid playerId, decimal amount, TransactionType type, CancellationToken ct)
+    {
+        var last24h = (await _uow.Transactions.GetLast24HoursTransactionsByPlayerAsync(playerId, ct)).ToList();
+
+        // Red flag 1: 5+ transactions in the last 24 hours (velocity check)
         if (last24h.Count >= 5)
-            return true;
+            return (true, "High transaction velocity: 5+ transactions in 24 hours.");
 
-        // Red flag 2: wypłata > 10,000
+        // Red flag 2: single transaction above 10,000
         if (amount > 10000m)
-            return true;
+            return (true, $"Single transaction amount ({amount:C}) exceeds AML threshold of 10,000.");
 
-        // Red flag 3: suma wypłat w ciągu 24h > 20,000
-        var totalWithdrawals = last24h
-            .Where(t => t.Type == TransactionType.Withdrawal)
-            .Sum(t => t.Amount);
+        // Red flag 3: total volume in 24 hours exceeds 20,000
+        var total24h = last24h.Sum(t => t.Amount) + amount;
+        if (total24h > 20000m)
+            return (true, $"24-hour transaction volume ({total24h:C}) exceeds AML threshold of 20,000.");
 
-        if (totalWithdrawals + amount > 20000m)
-            return true;
-
-        return false;
+        return (false, string.Empty);
     }
 
     private async Task CreateAuditLog(

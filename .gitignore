@@ -178,3 +178,9 @@ App_Data/
 
 # CI/CD
 .github/workflows/*.local.yml
+
+# Claude Code
+CLAUDE.md
+.claude/
+*-plan.md
+*-plan.MD

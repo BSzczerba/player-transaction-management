@@ -1,5 +1,5 @@
-﻿using Application.Repositories.Interfaces;
-using AutoMapper;
+using Application.DTOs;
+using Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,49 +11,26 @@ namespace API.Controllers;
 [Produces("application/json")]
 public class PaymentMethodsController : ControllerBase
 {
-    private readonly IUnitOfWork _uow;
-    private readonly IMapper _mapper;
+    private readonly IPaymentMethodService _svc;
 
-    public PaymentMethodsController(IUnitOfWork uow, IMapper mapper)
-    {
-        _uow = uow;
-        _mapper = mapper;
-    }
+    public PaymentMethodsController(IPaymentMethodService svc) => _svc = svc;
 
-    /// <summary>Pobierz wszystkie aktywne metody płatności</summary>
+    /// <summary>Get all active payment methods</summary>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<PaymentMethodDto>), 200)]
     public async Task<IActionResult> GetActive(CancellationToken ct)
     {
-        var methods = await _uow.PaymentMethods.GetActivePaymentMethodsAsync(ct);
-        var dtos = _mapper.Map<IEnumerable<PaymentMethodDto>>(methods);
-        return Ok(dtos);
+        var methods = await _svc.GetActiveAsync(ct);
+        return Ok(methods);
     }
 
-    /// <summary>Pobierz metodę płatności po ID</summary>
+    /// <summary>Get a payment method by ID</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(PaymentMethodDto), 200)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
-        var method = await _uow.PaymentMethods.GetByIdAsync(id, ct);
-        if (method is null) return NotFound();
-
-        var dto = _mapper.Map<PaymentMethodDto>(method);
-        return Ok(dto);
+        var method = await _svc.GetByIdAsync(id, ct);
+        return method is null ? NotFound() : Ok(method);
     }
-}
-
-// DTO dla Payment Method (mogłoby być w Application/DTOs ale trzymamy tutaj dla szybkości)
-public class PaymentMethodDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string Type { get; set; } = string.Empty;
-    public bool IsActive { get; set; }
-    public decimal MinAmount { get; set; }
-    public decimal MaxAmount { get; set; }
-    public decimal FeePercentage { get; set; }
-    public decimal FixedFee { get; set; }
-    public int ProcessingTimeMinutes { get; set; }
 }

@@ -26,4 +26,9 @@ public interface IAuthService
     /// Validate JWT token
     /// </summary>
     Task<bool> ValidateTokenAsync(string token, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Activate account using the token sent during registration
+    /// </summary>
+    Task<bool> ActivateAccountAsync(string token, CancellationToken cancellationToken = default);
 }

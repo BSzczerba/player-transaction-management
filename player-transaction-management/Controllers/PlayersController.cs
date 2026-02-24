@@ -1,6 +1,5 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Application.Services.Interfaces;
-using Application.Services.Implementations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -17,9 +16,10 @@ public class PlayersController : ControllerBase
 
     public PlayersController(IPlayerService svc) => _svc = svc;
 
-    /// <summary>Pobierz profil zalogowanego gracza</summary>
+    /// <summary>Get the profile of the currently logged-in player</summary>
     [HttpGet("me")]
     [ProducesResponseType(typeof(PlayerDto), 200)]
+    [ProducesResponseType(404)]
     public async Task<IActionResult> GetMe(CancellationToken ct)
     {
         var id = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -27,25 +27,18 @@ public class PlayersController : ControllerBase
         return player is null ? NotFound() : Ok(player);
     }
 
-    /// <summary>Aktualizuj profil</summary>
+    /// <summary>Update the current player's profile</summary>
     [HttpPut("me")]
     [ProducesResponseType(typeof(PlayerDto), 200)]
-    [ProducesResponseType(400)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> UpdateMe([FromBody] UpdatePlayerDto dto, CancellationToken ct)
     {
-        try
-        {
-            var id = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var player = await _svc.UpdateAsync(id, dto, ct);
-            return Ok(player);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        var id = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var player = await _svc.UpdateAsync(id, dto, ct);
+        return Ok(player);
     }
 
-    /// <summary>Pobierz wszystkich graczy (tylko Admin)</summary>
+    /// <summary>Get all players (Administrator only)</summary>
     [HttpGet]
     [Authorize(Roles = "Administrator")]
     [ProducesResponseType(typeof(IEnumerable<PlayerDto>), 200)]
@@ -55,7 +48,7 @@ public class PlayersController : ControllerBase
         return Ok(players);
     }
 
-    /// <summary>Pobierz gracza po ID (tylko Admin)</summary>
+    /// <summary>Get a player by ID (Administrator only)</summary>
     [HttpGet("{id:guid}")]
     [Authorize(Roles = "Administrator")]
     [ProducesResponseType(typeof(PlayerDto), 200)]

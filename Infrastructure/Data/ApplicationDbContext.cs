@@ -1,6 +1,5 @@
 ﻿using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System.Numerics;
 
 namespace Infrastructure.Data;
 
@@ -62,7 +61,8 @@ public class ApplicationDbContext : DbContext
             {
                 case EntityState.Added:
                     entry.Entity.CreatedAt = DateTime.UtcNow;
-                    entry.Entity.Id = Guid.NewGuid();
+                    if (entry.Entity.Id == Guid.Empty)
+                        entry.Entity.Id = Guid.NewGuid();
                     break;
 
                 case EntityState.Modified:

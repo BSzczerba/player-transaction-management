@@ -1,4 +1,5 @@
-﻿using Domain.Entities;
+﻿using Application.DTOs;
+using Domain.Entities;
 
 namespace Application.Repositories.Interfaces;
 
@@ -52,6 +53,16 @@ public interface ITransactionRepository : IRepository<Transaction>
     /// Get player's transactions for today
     /// </summary>
     Task<IEnumerable<Transaction>> GetTodaysTransactionsByPlayerAsync(Guid playerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get player's transactions from the last 24 hours (rolling window, translated to SQL)
+    /// </summary>
+    Task<IEnumerable<Transaction>> GetLast24HoursTransactionsByPlayerAsync(Guid playerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get filtered and paginated transactions
+    /// </summary>
+    Task<(IEnumerable<Transaction> Items, int TotalCount)> GetFilteredAsync(TransactionFilterDto filter, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

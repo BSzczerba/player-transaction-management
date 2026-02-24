@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using Domain.Entities;
 using Infrastructure.Data;
 using Application.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +10,7 @@ namespace Infrastructure.Repositories.Implementations;
 /// Generic repository implementation
 /// </summary>
 /// <typeparam name="T">Entity type</typeparam>
-public class Repository<T> : IRepository<T> where T : class
+public class Repository<T> : IRepository<T> where T : BaseEntity
 {
     protected readonly ApplicationDbContext _context;
     protected readonly DbSet<T> _dbSet;
@@ -22,7 +23,7 @@ public class Repository<T> : IRepository<T> where T : class
 
     public virtual async Task<T?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        return await _dbSet.FindAsync(new object[] { id }, cancellationToken);
+        return await _dbSet.FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
     }
 
     public virtual async Task<IEnumerable<T>> GetAllAsync(CancellationToken cancellationToken = default)

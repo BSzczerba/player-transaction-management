@@ -1,18 +1,21 @@
+using API.Middleware;
 using Application.Interfaces;
-using Application.Services;
 using Application.Services.Implementations;
 using Application.Services.Interfaces;
 using FluentValidation;
 using Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using System.Text;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
+// ─── Logging ─────────────────────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .WriteTo.Console()
@@ -21,11 +24,10 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// Add services to the container
+// ─── MVC & Swagger ───────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// Configure Swagger
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
@@ -40,7 +42,6 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 
-    // Add JWT Authentication to Swagger
     options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
         Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token",
@@ -66,14 +67,14 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// Configure Database
+// ─── Database ─────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
         b => b.MigrationsAssembly("Infrastructure")
     ));
 
-// Configure JWT Authentication
+// ─── JWT Authentication ──────────────────────────────────────────────────────
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT Secret Key not configured");
 
@@ -99,7 +100,7 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// Configure CORS
+// ─── CORS ────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -111,25 +112,58 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add AutoMapper
-builder.Services.AddAutoMapper(typeof(Application.Mappings.MappingProfile).Assembly);
+// ─── Rate Limiting ───────────────────────────────────────────────────────────
+builder.Services.AddRateLimiter(options =>
+{
+    // Strict limit for auth endpoints (brute-force protection)
+    options.AddFixedWindowLimiter("auth", o =>
+    {
+        o.PermitLimit = 10;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
 
-// Add FluentValidation
+    // General API limit
+    options.AddFixedWindowLimiter("api", o =>
+    {
+        o.PermitLimit = 100;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 5;
+    });
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+
+// ─── Health Checks ───────────────────────────────────────────────────────────
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<ApplicationDbContext>(
+        name: "database",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: new[] { "db", "sql" });
+
+// ─── Global Exception Handler ────────────────────────────────────────────────
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+// ─── Application Services ────────────────────────────────────────────────────
+builder.Services.AddAutoMapper(typeof(Application.Mappings.MappingProfile).Assembly);
 builder.Services.AddValidatorsFromAssemblyContaining<Application.Validators.RegisterDtoValidator>();
 
-// Register Repositories and Unit of Work
 builder.Services.AddScoped<Application.Repositories.Interfaces.IUnitOfWork, Infrastructure.Repositories.Implementations.UnitOfWork>();
 
-// Register Application Services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITransactionService, TransactionService>();
 builder.Services.AddScoped<IPlayerService, PlayerService>();
-
+builder.Services.AddScoped<IPaymentMethodService, PaymentMethodService>();
 builder.Services.AddScoped<IPasswordHasher, Infrastructure.Services.BcryptPasswordHasher>();
 
+// ─── Pipeline ────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
+app.UseExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -141,24 +175,21 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseSerilogRequestLogging();
-
 app.UseHttpsRedirection();
-
 app.UseCors("AllowFrontend");
-
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
+app.MapControllers().RequireRateLimiting("api");
+app.MapHealthChecks("/health");
 
-// Apply migrations automatically in development
+// ─── Dev startup: migrate + seed ─────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     dbContext.Database.Migrate();
-
-    // Seed initial data
     await DatabaseSeeder.SeedAsync(dbContext);
 }
 

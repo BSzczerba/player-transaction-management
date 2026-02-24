@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -21,7 +21,7 @@ public class TransactionsController : ControllerBase
         _log = log;
     }
 
-    /// <summary>Pobierz transakcję po ID</summary>
+    /// <summary>Get a transaction by ID</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TransactionDto), 200)]
     [ProducesResponseType(404)]
@@ -31,17 +31,24 @@ public class TransactionsController : ControllerBase
         return tx is null ? NotFound() : Ok(tx);
     }
 
-    /// <summary>Pobierz transakcje zalogowanego gracza</summary>
+    /// <summary>
+    /// Get paginated transactions of the currently logged-in player.
+    /// </summary>
     [HttpGet("my")]
-    [ProducesResponseType(typeof(IEnumerable<TransactionDto>), 200)]
-    public async Task<IActionResult> GetMy(CancellationToken ct)
+    [ProducesResponseType(typeof(PagedResult<TransactionDto>), 200)]
+    public async Task<IActionResult> GetMy(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
         var playerId = GetCurrentUserId();
-        var txs = await _svc.GetByPlayerAsync(playerId, ct);
-        return Ok(txs);
+        var result = await _svc.GetByPlayerPagedAsync(playerId, page, pageSize, ct);
+        return Ok(result);
     }
 
-    /// <summary>Pobierz wszystkie oczekujące transakcje (tylko Operator/Admin)</summary>
+    /// <summary>
+    /// Get all pending transactions (Operator/Admin only).
+    /// </summary>
     [HttpGet("pending")]
     [Authorize(Roles = "Operator,Administrator")]
     [ProducesResponseType(typeof(IEnumerable<TransactionDto>), 200)]
@@ -51,94 +58,77 @@ public class TransactionsController : ControllerBase
         return Ok(txs);
     }
 
-    /// <summary>Utwórz wpłatę (deposit)</summary>
+    /// <summary>
+    /// Get filtered and paginated transactions (Operator/Admin/ComplianceOfficer only).
+    /// All query parameters are optional.
+    /// </summary>
+    [HttpGet]
+    [Authorize(Roles = "Operator,Administrator,ComplianceOfficer")]
+    [ProducesResponseType(typeof(PagedResult<TransactionDto>), 200)]
+    public async Task<IActionResult> GetAll(
+        [FromQuery] TransactionFilterDto filter,
+        CancellationToken ct)
+    {
+        var result = await _svc.GetAllAsync(filter, ct);
+        return Ok(result);
+    }
+
+    /// <summary>Create a deposit</summary>
     [HttpPost("deposit")]
     [ProducesResponseType(typeof(TransactionDto), 201)]
-    [ProducesResponseType(400)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> CreateDeposit([FromBody] CreateDepositDto dto, CancellationToken ct)
     {
-        try
-        {
-            var playerId = GetCurrentUserId();
-            var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-            var tx = await _svc.CreateDepositAsync(playerId, dto, ip, ct);
+        var playerId = GetCurrentUserId();
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var tx = await _svc.CreateDepositAsync(playerId, dto, ip, ct);
 
-            _log.LogInformation("Deposit created: {TransactionId} for {PlayerId}", tx.Id, playerId);
-            return CreatedAtAction(nameof(GetById), new { id = tx.Id }, tx);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        _log.LogInformation("Deposit created: {TransactionId} for {PlayerId}", tx.Id, playerId);
+        return CreatedAtAction(nameof(GetById), new { id = tx.Id }, tx);
     }
 
-    /// <summary>Utwórz wypłatę (withdrawal)</summary>
+    /// <summary>Create a withdrawal</summary>
     [HttpPost("withdraw")]
     [ProducesResponseType(typeof(TransactionDto), 201)]
-    [ProducesResponseType(400)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> CreateWithdrawal([FromBody] CreateWithdrawalDto dto, CancellationToken ct)
     {
-        try
-        {
-            var playerId = GetCurrentUserId();
-            var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-            var tx = await _svc.CreateWithdrawalAsync(playerId, dto, ip, ct);
+        var playerId = GetCurrentUserId();
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var tx = await _svc.CreateWithdrawalAsync(playerId, dto, ip, ct);
 
-            _log.LogInformation("Withdrawal created: {TransactionId} for {PlayerId}", tx.Id, playerId);
-            return CreatedAtAction(nameof(GetById), new { id = tx.Id }, tx);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        _log.LogInformation("Withdrawal created: {TransactionId} for {PlayerId}", tx.Id, playerId);
+        return CreatedAtAction(nameof(GetById), new { id = tx.Id }, tx);
     }
 
-    /// <summary>Zatwierdź transakcję (tylko Operator/Admin)</summary>
+    /// <summary>Approve a transaction (Operator/Admin only)</summary>
     [HttpPost("{id:guid}/approve")]
     [Authorize(Roles = "Operator,Administrator")]
     [ProducesResponseType(typeof(TransactionDto), 200)]
-    [ProducesResponseType(400)]
-    public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveDto? dto, CancellationToken ct)
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveTransactionDto? dto, CancellationToken ct)
     {
-        try
-        {
-            var operatorId = GetCurrentUserId();
-            var tx = await _svc.ApproveAsync(id, operatorId, dto?.Notes, ct);
+        var operatorId = GetCurrentUserId();
+        var tx = await _svc.ApproveAsync(id, operatorId, dto?.Notes, ct);
 
-            _log.LogInformation("Transaction {TransactionId} approved by {OperatorId}", id, operatorId);
-            return Ok(tx);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        _log.LogInformation("Transaction {TransactionId} approved by {OperatorId}", id, operatorId);
+        return Ok(tx);
     }
 
-    /// <summary>Odrzuć transakcję (tylko Operator/Admin)</summary>
+    /// <summary>Reject a transaction (Operator/Admin only)</summary>
     [HttpPost("{id:guid}/reject")]
     [Authorize(Roles = "Operator,Administrator")]
     [ProducesResponseType(typeof(TransactionDto), 200)]
-    [ProducesResponseType(400)]
-    public async Task<IActionResult> Reject(Guid id, [FromBody] RejectDto dto, CancellationToken ct)
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    public async Task<IActionResult> Reject(Guid id, [FromBody] RejectTransactionDto dto, CancellationToken ct)
     {
-        try
-        {
-            var operatorId = GetCurrentUserId();
-            var tx = await _svc.RejectAsync(id, operatorId, dto.Reason, ct);
+        var operatorId = GetCurrentUserId();
+        var tx = await _svc.RejectAsync(id, operatorId, dto.Reason, ct);
 
-            _log.LogInformation("Transaction {TransactionId} rejected by {OperatorId}", id, operatorId);
-            return Ok(tx);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        _log.LogInformation("Transaction {TransactionId} rejected by {OperatorId}", id, operatorId);
+        return Ok(tx);
     }
 
     private Guid GetCurrentUserId()
         => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }
-
-// Helper DTOs (małe, proste - można też dodać do Application/DTOs)
-public record ApproveDto(string? Notes);
-public record RejectDto(string Reason);

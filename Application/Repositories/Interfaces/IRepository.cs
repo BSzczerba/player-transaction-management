@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using Domain.Entities;
 
 namespace Application.Repositories.Interfaces;
 
@@ -6,7 +7,7 @@ namespace Application.Repositories.Interfaces;
 /// Generic repository interface for common CRUD operations
 /// </summary>
 /// <typeparam name="T">Entity type</typeparam>
-public interface IRepository<T> where T : class
+public interface IRepository<T> where T : BaseEntity
 {
     /// <summary>
     /// Get entity by ID

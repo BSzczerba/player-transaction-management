@@ -1,5 +1,4 @@
 ﻿using Domain.Enums;
-using System.Transactions;
 
 namespace Domain.Entities;
 
@@ -87,6 +86,26 @@ public class Player : BaseEntity
     /// Last login timestamp
     /// </summary>
     public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// Refresh token (opaque string; in production store hashed)
+    /// </summary>
+    public string? RefreshToken { get; set; }
+
+    /// <summary>
+    /// Refresh token expiry
+    /// </summary>
+    public DateTime? RefreshTokenExpiry { get; set; }
+
+    /// <summary>
+    /// Email activation token generated on registration
+    /// </summary>
+    public string? ActivationToken { get; set; }
+
+    /// <summary>
+    /// Activation token expiry (24 h after registration)
+    /// </summary>
+    public DateTime? ActivationTokenExpiry { get; set; }
 
     /// <summary>
     /// Navigation property: Player's transactions

@@ -33,6 +33,11 @@ public class AuthResponseDto
     public string RefreshToken { get; set; } = string.Empty;
     public DateTime ExpiresAt { get; set; }
     public PlayerDto User { get; set; } = null!;
+    /// <summary>
+    /// Activation token returned on registration — simulate email delivery.
+    /// In production this would be sent via email, not returned in the response.
+    /// </summary>
+    public string? ActivationToken { get; set; }
 }
 
 /// <summary>
@@ -42,4 +47,12 @@ public class RefreshTokenDto
 {
     public string Token { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// DTO for account activation via token
+/// </summary>
+public class ActivateAccountDto
+{
+    public string Token { get; set; } = string.Empty;
 }
