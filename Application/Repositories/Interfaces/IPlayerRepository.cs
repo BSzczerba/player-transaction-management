@@ -81,15 +81,9 @@ public interface IPaymentMethodRepository : IRepository<PaymentMethod>
 /// </summary>
 public interface IAuditLogRepository : IRepository<AuditLog>
 {
-    /// <summary>
-    /// Get audit logs for a specific user
-    /// </summary>
     Task<IEnumerable<AuditLog>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Get audit logs for a specific entity
-    /// </summary>
     Task<IEnumerable<AuditLog>> GetByEntityAsync(string entityType, Guid entityId, CancellationToken cancellationToken = default);
+    Task<(IEnumerable<AuditLog> Items, int TotalCount)> GetFilteredAsync(AuditLogFilterDto filter, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -97,13 +91,9 @@ public interface IAuditLogRepository : IRepository<AuditLog>
 /// </summary>
 public interface INotificationRepository : IRepository<Notification>
 {
-    /// <summary>
-    /// Get unread notifications for a user
-    /// </summary>
     Task<IEnumerable<Notification>> GetUnreadByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Mark notification as read
-    /// </summary>
+    Task<IEnumerable<Notification>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task MarkAsReadAsync(Guid notificationId, CancellationToken cancellationToken = default);
+    Task MarkAllAsReadAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default);
 }

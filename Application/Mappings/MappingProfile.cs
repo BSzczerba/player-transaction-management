@@ -41,6 +41,10 @@ public class MappingProfile : Profile
 
         // Notification mappings
         CreateMap<Notification, NotificationDto>();
+
+        // AuditLog mappings
+        CreateMap<AuditLog, AuditLogDto>()
+            .ForMember(dest => dest.Username, opt => opt.MapFrom(src => src.User != null ? src.User.Username : null));
     }
 }
 

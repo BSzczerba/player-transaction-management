@@ -1,6 +1,6 @@
 using Application.DTOs;
-using Application.Services.Interfaces;
 using Application.Repositories.Interfaces;
+using Application.Services.Interfaces;
 using AutoMapper;
 using Domain.Entities;
 using Domain.Enums;
@@ -17,12 +17,17 @@ public class TransactionService : ITransactionService
     private readonly IUnitOfWork _uow;
     private readonly IMapper _mapper;
     private readonly ILogger<TransactionService> _log;
+    private readonly IAuditService _audit;
+    private readonly INotificationService _notifications;
 
-    public TransactionService(IUnitOfWork uow, IMapper mapper, ILogger<TransactionService> log)
+    public TransactionService(IUnitOfWork uow, IMapper mapper, ILogger<TransactionService> log,
+        IAuditService audit, INotificationService notifications)
     {
         _uow = uow;
         _mapper = mapper;
         _log = log;
+        _audit = audit;
+        _notifications = notifications;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -97,7 +102,7 @@ public class TransactionService : ITransactionService
         await _uow.Transactions.AddAsync(transaction, ct);
         await _uow.SaveChangesAsync(ct);
 
-        await CreateAuditLog("CreateDeposit", playerId, transaction.Id, ipAddress, ct);
+        await _audit.LogAsync(playerId, "CreateDeposit", "Transaction", transaction.Id, ipAddress, ct: ct);
 
         return _mapper.Map<TransactionDto>(transaction);
     }
@@ -166,7 +171,7 @@ public class TransactionService : ITransactionService
         await _uow.Transactions.AddAsync(transaction, ct);
         await _uow.SaveChangesAsync(ct);
 
-        await CreateAuditLog("CreateWithdrawal", playerId, transaction.Id, ipAddress, ct);
+        await _audit.LogAsync(playerId, "CreateWithdrawal", "Transaction", transaction.Id, ipAddress, ct: ct);
 
         _log.LogInformation("Withdrawal of {Amount} for player {PlayerId} pending approval", dto.Amount, playerId);
 
@@ -218,14 +223,14 @@ public class TransactionService : ITransactionService
         _uow.Players.Update(player);
         await _uow.SaveChangesAsync(ct);
 
-        await CreateAuditLog("ApproveTransaction", operatorId, transactionId, null, ct);
+        await _audit.LogAsync(operatorId, "ApproveTransaction", "Transaction", transactionId, ct: ct);
 
-        await CreateNotification(
+        await _notifications.CreateAsync(
             player.Id,
+            "TransactionUpdate",
             "Transaction Approved",
             $"Your {transaction.Type} of {transaction.Amount:C} has been approved.",
-            transaction.Id,
-            ct);
+            "Transaction", transaction.Id, ct);
 
         _log.LogInformation("Transaction {TransactionId} approved by operator {OperatorId}",
             transactionId, operatorId);
@@ -257,14 +262,14 @@ public class TransactionService : ITransactionService
         _uow.Transactions.Update(transaction);
         await _uow.SaveChangesAsync(ct);
 
-        await CreateAuditLog("RejectTransaction", operatorId, transactionId, null, ct);
+        await _audit.LogAsync(operatorId, "RejectTransaction", "Transaction", transactionId, ct: ct);
 
-        await CreateNotification(
+        await _notifications.CreateAsync(
             transaction.PlayerId,
+            "TransactionUpdate",
             "Transaction Rejected",
             $"Your {transaction.Type} of {transaction.Amount:C} was rejected. Reason: {reason}",
-            transaction.Id,
-            ct);
+            "Transaction", transaction.Id, ct);
 
         _log.LogInformation("Transaction {TransactionId} rejected by operator {OperatorId}",
             transactionId, operatorId);
@@ -320,6 +325,12 @@ public class TransactionService : ITransactionService
         };
     }
 
+    public async Task<IEnumerable<TransactionDto>> GetFlaggedAsync(CancellationToken ct = default)
+    {
+        var transactions = await _uow.Transactions.GetFlaggedTransactionsAsync(ct);
+        return _mapper.Map<IEnumerable<TransactionDto>>(transactions);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -349,46 +360,4 @@ public class TransactionService : ITransactionService
         return (false, string.Empty);
     }
 
-    private async Task CreateAuditLog(
-        string action,
-        Guid userId,
-        Guid? entityId,
-        string? ipAddress,
-        CancellationToken ct)
-    {
-        var log = new AuditLog
-        {
-            UserId = userId,
-            Action = action,
-            EntityType = "Transaction",
-            EntityId = entityId,
-            IpAddress = ipAddress,
-            Details = $"{action} at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}"
-        };
-
-        await _uow.AuditLogs.AddAsync(log, ct);
-        await _uow.SaveChangesAsync(ct);
-    }
-
-    private async Task CreateNotification(
-        Guid userId,
-        string title,
-        string message,
-        Guid? relatedEntityId,
-        CancellationToken ct)
-    {
-        var notification = new Notification
-        {
-            UserId = userId,
-            Type = "TransactionUpdate",
-            Title = title,
-            Message = message,
-            IsRead = false,
-            RelatedEntityId = relatedEntityId,
-            RelatedEntityType = "Transaction"
-        };
-
-        await _uow.Notifications.AddAsync(notification, ct);
-        await _uow.SaveChangesAsync(ct);
-    }
 }

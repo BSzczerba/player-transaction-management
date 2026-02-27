@@ -13,5 +13,6 @@ namespace Application.Services.Interfaces
         Task<IEnumerable<TransactionDto>> GetPendingAsync(CancellationToken ct = default);
         Task<TransactionDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
         Task<PagedResult<TransactionDto>> GetAllAsync(TransactionFilterDto filter, CancellationToken ct = default);
+        Task<IEnumerable<TransactionDto>> GetFlaggedAsync(CancellationToken ct = default);
     }
 }

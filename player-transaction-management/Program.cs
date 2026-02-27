@@ -157,6 +157,9 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITransactionService, TransactionService>();
 builder.Services.AddScoped<IPlayerService, PlayerService>();
 builder.Services.AddScoped<IPaymentMethodService, PaymentMethodService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IComplianceService, ComplianceService>();
 builder.Services.AddScoped<IPasswordHasher, Infrastructure.Services.BcryptPasswordHasher>();
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────

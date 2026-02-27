@@ -21,14 +21,31 @@ public class TransactionsController : ControllerBase
         _log = log;
     }
 
-    /// <summary>Get a transaction by ID</summary>
+    /// <summary>Get a transaction by ID. Players can only view their own transactions.</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TransactionDto), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(403)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var tx = await _svc.GetByIdAsync(id, ct);
-        return tx is null ? NotFound() : Ok(tx);
+        if (tx is null) return NotFound();
+
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role == "Player" && tx.PlayerId != GetCurrentUserId())
+            return Forbid();
+
+        return Ok(tx);
+    }
+
+    /// <summary>Get flagged transactions (Operator/Admin/ComplianceOfficer only)</summary>
+    [HttpGet("flagged")]
+    [Authorize(Roles = "Operator,Administrator,ComplianceOfficer")]
+    [ProducesResponseType(typeof(IEnumerable<TransactionDto>), 200)]
+    public async Task<IActionResult> GetFlagged(CancellationToken ct)
+    {
+        var txs = await _svc.GetFlaggedAsync(ct);
+        return Ok(txs);
     }
 
     /// <summary>

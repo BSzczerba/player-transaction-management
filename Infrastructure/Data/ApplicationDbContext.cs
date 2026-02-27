@@ -31,6 +31,7 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Player>().HasQueryFilter(p => !p.IsDeleted);
         modelBuilder.Entity<Transaction>().HasQueryFilter(t => !t.IsDeleted);
         modelBuilder.Entity<PaymentMethod>().HasQueryFilter(pm => !pm.IsDeleted);
+        modelBuilder.Entity<Notification>().HasQueryFilter(n => !n.IsDeleted);
     }
 
     /// <summary>
