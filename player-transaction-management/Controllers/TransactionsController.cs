@@ -25,15 +25,19 @@ public class TransactionsController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TransactionDto), 200)]
     [ProducesResponseType(404)]
-    [ProducesResponseType(403)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var tx = await _svc.GetByIdAsync(id, ct);
         if (tx is null) return NotFound();
 
-        var role = User.FindFirstValue(ClaimTypes.Role);
-        if (role == "Player" && tx.PlayerId != GetCurrentUserId())
-            return Forbid();
+        // Non-privileged users can only see their own transactions.
+        // Return 404 (not 403) to prevent ID enumeration — a 403 response would reveal
+        // that a foreign transaction exists, which is an exploitable information leak.
+        if (!User.IsInRole("Operator") && !User.IsInRole("Administrator") && !User.IsInRole("ComplianceOfficer"))
+        {
+            if (tx.PlayerId != GetCurrentUserId())
+                return NotFound();
+        }
 
         return Ok(tx);
     }
@@ -41,10 +45,13 @@ public class TransactionsController : ControllerBase
     /// <summary>Get flagged transactions (Operator/Admin/ComplianceOfficer only)</summary>
     [HttpGet("flagged")]
     [Authorize(Roles = "Operator,Administrator,ComplianceOfficer")]
-    [ProducesResponseType(typeof(IEnumerable<TransactionDto>), 200)]
-    public async Task<IActionResult> GetFlagged(CancellationToken ct)
+    [ProducesResponseType(typeof(PagedResult<TransactionDto>), 200)]
+    public async Task<IActionResult> GetFlagged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
-        var txs = await _svc.GetFlaggedAsync(ct);
+        var txs = await _svc.GetFlaggedAsync(page, pageSize, ct);
         return Ok(txs);
     }
 
@@ -68,10 +75,13 @@ public class TransactionsController : ControllerBase
     /// </summary>
     [HttpGet("pending")]
     [Authorize(Roles = "Operator,Administrator")]
-    [ProducesResponseType(typeof(IEnumerable<TransactionDto>), 200)]
-    public async Task<IActionResult> GetPending(CancellationToken ct)
+    [ProducesResponseType(typeof(PagedResult<TransactionDto>), 200)]
+    public async Task<IActionResult> GetPending(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
-        var txs = await _svc.GetPendingAsync(ct);
+        var txs = await _svc.GetPendingAsync(page, pageSize, ct);
         return Ok(txs);
     }
 

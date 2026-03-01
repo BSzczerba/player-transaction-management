@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Domain.Entities;
 using Infrastructure.Data;
 using Application.Repositories.Interfaces;
@@ -13,6 +13,7 @@ public class PaymentMethodRepository : Repository<PaymentMethod>, IPaymentMethod
     public async Task<IEnumerable<PaymentMethod>> GetActivePaymentMethodsAsync(CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Where(pm => pm.IsActive)
             .OrderBy(pm => pm.Name)
             .ToListAsync(cancellationToken);
@@ -26,6 +27,7 @@ public class AuditLogRepository : Repository<AuditLog>, IAuditLogRepository
     public async Task<IEnumerable<AuditLog>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Include(a => a.User)
             .Where(a => a.UserId == userId)
             .OrderByDescending(a => a.CreatedAt)
@@ -35,6 +37,7 @@ public class AuditLogRepository : Repository<AuditLog>, IAuditLogRepository
     public async Task<IEnumerable<AuditLog>> GetByEntityAsync(string entityType, Guid entityId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Include(a => a.User)
             .Where(a => a.EntityType == entityType && a.EntityId == entityId)
             .OrderByDescending(a => a.CreatedAt)
@@ -44,7 +47,10 @@ public class AuditLogRepository : Repository<AuditLog>, IAuditLogRepository
     public async Task<(IEnumerable<AuditLog> Items, int TotalCount)> GetFilteredAsync(
         AuditLogFilterDto filter, CancellationToken cancellationToken = default)
     {
-        var query = _dbSet.Include(a => a.User).AsQueryable();
+        var query = _dbSet
+            .AsNoTracking()
+            .Include(a => a.User)
+            .AsQueryable();
 
         if (filter.UserId.HasValue)
             query = query.Where(a => a.UserId == filter.UserId.Value);
@@ -79,6 +85,7 @@ public class NotificationRepository : Repository<Notification>, INotificationRep
     public async Task<IEnumerable<Notification>> GetUnreadByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Where(n => n.UserId == userId && !n.IsRead)
             .OrderByDescending(n => n.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -87,6 +94,7 @@ public class NotificationRepository : Repository<Notification>, INotificationRep
     public async Task<IEnumerable<Notification>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Where(n => n.UserId == userId)
             .OrderByDescending(n => n.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -94,6 +102,7 @@ public class NotificationRepository : Repository<Notification>, INotificationRep
 
     public async Task MarkAsReadAsync(Guid notificationId, CancellationToken cancellationToken = default)
     {
+        // Tracking required: entity is modified after load.
         var notification = await GetByIdAsync(notificationId, cancellationToken);
         if (notification != null)
         {
@@ -105,6 +114,7 @@ public class NotificationRepository : Repository<Notification>, INotificationRep
 
     public async Task MarkAllAsReadAsync(Guid userId, CancellationToken cancellationToken = default)
     {
+        // Tracking required: entities are modified in bulk after load.
         var unread = await _dbSet
             .Where(n => n.UserId == userId && !n.IsRead)
             .ToListAsync(cancellationToken);

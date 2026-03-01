@@ -72,6 +72,9 @@ public class PlayerConfiguration : IEntityTypeConfiguration<Player>
             .HasForeignKey(a => a.UserId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.Property(p => p.RowVersion)
+            .IsRowVersion();
+
         // Indexes for performance
         builder.HasIndex(p => p.Status);
         builder.HasIndex(p => p.CreatedAt);

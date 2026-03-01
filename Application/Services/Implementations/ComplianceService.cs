@@ -24,29 +24,7 @@ public class ComplianceService : IComplianceService
 
     public async Task<ComplianceSummaryDto> GetSummaryAsync(CancellationToken ct = default)
     {
-        var flagged = (await _uow.Transactions.GetFlaggedTransactionsAsync(ct)).ToList();
-
-        var playerGroups = flagged
-            .GroupBy(t => t.PlayerId)
-            .Select(g => new FlaggedPlayerSummaryDto
-            {
-                PlayerId = g.Key,
-                Username = g.First().Player?.Username ?? "Unknown",
-                FlaggedTransactionCount = g.Count(),
-                TotalFlaggedAmount = g.Sum(t => t.Amount),
-                LatestFlagReason = g.OrderByDescending(t => t.CreatedAt).First().FlagReason
-            })
-            .OrderByDescending(p => p.FlaggedTransactionCount)
-            .ToList();
-
-        return new ComplianceSummaryDto
-        {
-            TotalFlaggedTransactions = flagged.Count,
-            PendingReviewCount = flagged.Count(t => t.Status == TransactionStatus.Pending),
-            TotalFlaggedAmount = flagged.Sum(t => t.Amount),
-            FlaggedPlayersCount = playerGroups.Count,
-            TopFlaggedPlayers = playerGroups.Take(10)
-        };
+        return await _uow.Transactions.GetComplianceSummaryAsync(ct);
     }
 
     public async Task<PlayerRiskProfileDto> GetPlayerRiskProfileAsync(Guid playerId, CancellationToken ct = default)
@@ -54,8 +32,16 @@ public class ComplianceService : IComplianceService
         var player = await _uow.Players.GetByIdAsync(playerId, ct)
             ?? throw new InvalidOperationException("Player not found.");
 
-        var allTransactions = (await _uow.Transactions.GetByPlayerIdAsync(playerId, ct)).ToList();
-        var flaggedTransactions = allTransactions.Where(t => t.IsFlagged).ToList();
+        var riskStats = await _uow.Transactions.GetPlayerRiskStatsAsync(playerId, ct);
+
+        var flaggedFilter = new TransactionFilterDto
+        {
+            PlayerId = playerId,
+            IsFlagged = true,
+            Page = 1,
+            PageSize = 10
+        };
+        var (recentFlagged, _) = await _uow.Transactions.GetFilteredAsync(flaggedFilter, ct);
 
         return new PlayerRiskProfileDto
         {
@@ -63,47 +49,67 @@ public class ComplianceService : IComplianceService
             Username = player.Username,
             Status = player.Status.ToString(),
             KycVerified = player.KycVerified,
-            TotalTransactions = allTransactions.Count,
-            FlaggedTransactions = flaggedTransactions.Count,
-            TotalDeposited = allTransactions
-                .Where(t => t.Type == TransactionType.Deposit && t.Status == TransactionStatus.Completed)
-                .Sum(t => t.Amount),
-            TotalWithdrawn = allTransactions
-                .Where(t => t.Type == TransactionType.Withdrawal && t.Status == TransactionStatus.Completed)
-                .Sum(t => t.Amount),
+            TotalTransactions = riskStats.TotalTransactions,
+            FlaggedTransactions = riskStats.FlaggedTransactions,
+            TotalDeposited = riskStats.TotalDeposited,
+            TotalWithdrawn = riskStats.TotalWithdrawn,
             CurrentBalance = player.Balance,
             AccountCreated = player.CreatedAt,
-            RecentFlaggedTransactions = _mapper.Map<IEnumerable<TransactionDto>>(
-                flaggedTransactions.OrderByDescending(t => t.CreatedAt).Take(10))
+            RecentFlaggedTransactions = _mapper.Map<IEnumerable<TransactionDto>>(recentFlagged)
         };
     }
 
-    public async Task<IEnumerable<TransactionDto>> GetFlaggedTransactionsAsync(CancellationToken ct = default)
+    public async Task<PagedResult<TransactionDto>> GetFlaggedTransactionsAsync(
+        int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        var flagged = await _uow.Transactions.GetFlaggedTransactionsAsync(ct);
-        return _mapper.Map<IEnumerable<TransactionDto>>(flagged);
+        var filter = new TransactionFilterDto
+        {
+            IsFlagged = true,
+            Page = page,
+            PageSize = pageSize
+        };
+        var (items, totalCount) = await _uow.Transactions.GetFilteredAsync(filter, ct);
+        var actualPageSize = Math.Clamp(pageSize, 1, 100);
+
+        return new PagedResult<TransactionDto>
+        {
+            Items = _mapper.Map<IEnumerable<TransactionDto>>(items),
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = actualPageSize
+        };
     }
 
     public async Task<TransactionDto> ClearFlagAsync(Guid transactionId, Guid officerId, string notes, CancellationToken ct = default)
     {
-        var transaction = await _uow.Transactions.GetByIdAsync(transactionId, ct)
-            ?? throw new InvalidOperationException("Transaction not found.");
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var transaction = await _uow.Transactions.GetByIdAsync(transactionId, ct)
+                ?? throw new InvalidOperationException("Transaction not found.");
 
-        if (!transaction.IsFlagged)
-            throw new InvalidOperationException("Transaction is not flagged.");
+            if (!transaction.IsFlagged)
+                throw new InvalidOperationException("Transaction is not flagged.");
 
-        transaction.IsFlagged = false;
-        transaction.FlagReason = $"[Cleared by compliance officer: {notes}] Original: {transaction.FlagReason}";
+            transaction.IsFlagged = false;
+            transaction.FlagReason = $"[Cleared by compliance officer: {notes}] Original: {transaction.FlagReason}";
 
-        _uow.Transactions.Update(transaction);
-        await _uow.SaveChangesAsync(ct);
+            _uow.Transactions.Update(transaction);
 
-        await _audit.LogAsync(officerId, "ClearAmlFlag", "Transaction", transactionId,
-            details: $"Flag cleared with notes: {notes}", ct: ct);
+            await _audit.LogAsync(officerId, "ClearAmlFlag", "Transaction", transactionId,
+                details: $"Flag cleared with notes: {notes}", ct: ct);
 
-        _log.LogInformation("AML flag cleared on transaction {TransactionId} by officer {OfficerId}",
-            transactionId, officerId);
+            await _uow.CommitTransactionAsync(ct);
 
-        return _mapper.Map<TransactionDto>(transaction);
+            _log.LogInformation("AML flag cleared on transaction {TransactionId} by officer {OfficerId}",
+                transactionId, officerId);
+
+            return _mapper.Map<TransactionDto>(transaction);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 }

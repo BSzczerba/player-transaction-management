@@ -116,4 +116,10 @@ public class Player : BaseEntity
     /// Navigation property: Audit logs related to this player
     /// </summary>
     public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+
+    /// <summary>
+    /// Optimistic concurrency token — prevents double-spend race conditions on
+    /// balance and daily limit checks under concurrent requests.
+    /// </summary>
+    public byte[] RowVersion { get; set; } = null!;
 }

@@ -35,8 +35,8 @@ public class NotificationService : INotificationService
         };
 
         await _uow.Notifications.AddAsync(notification, ct);
-        await _uow.SaveChangesAsync(ct);
-
+        // SaveChanges is intentionally omitted here: CreateAsync is always called within
+        // a TransactionService DB transaction, and CommitTransactionAsync handles the flush.
         _log.LogDebug("Notification created for user {UserId}: {Title}", userId, title);
 
         return _mapper.Map<NotificationDto>(notification);
@@ -61,7 +61,15 @@ public class NotificationService : INotificationService
 
     public async Task MarkAsReadAsync(Guid notificationId, Guid userId, CancellationToken ct = default)
     {
-        await _uow.Notifications.MarkAsReadAsync(notificationId, ct);
+        var notification = await _uow.Notifications.GetByIdAsync(notificationId, ct)
+            ?? throw new InvalidOperationException("Notification not found.");
+
+        if (notification.UserId != userId)
+            throw new UnauthorizedAccessException("Cannot mark another user's notification as read.");
+
+        notification.IsRead = true;
+        notification.ReadAt = DateTime.UtcNow;
+        _uow.Notifications.Update(notification);
         await _uow.SaveChangesAsync(ct);
     }
 

@@ -101,4 +101,9 @@ public class Transaction : BaseEntity
     /// Balance after this transaction
     /// </summary>
     public decimal? BalanceAfter { get; set; }
+
+    /// <summary>
+    /// Optimistic concurrency token — prevents double-approve/reject race conditions.
+    /// </summary>
+    public byte[] RowVersion { get; set; } = null!;
 }

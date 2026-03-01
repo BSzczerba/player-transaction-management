@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace API.Middleware;
 
@@ -23,10 +24,11 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
     {
         var (statusCode, title) = exception switch
         {
-            InvalidOperationException  => (StatusCodes.Status400BadRequest,  "Bad Request"),
-            UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Unauthorized"),
-            KeyNotFoundException       => (StatusCodes.Status404NotFound,     "Not Found"),
-            _                          => (StatusCodes.Status500InternalServerError, "Internal Server Error")
+            InvalidOperationException    => (StatusCodes.Status400BadRequest,   "Bad Request"),
+            UnauthorizedAccessException  => (StatusCodes.Status401Unauthorized, "Unauthorized"),
+            KeyNotFoundException         => (StatusCodes.Status404NotFound,     "Not Found"),
+            DbUpdateConcurrencyException => (StatusCodes.Status409Conflict,     "Conflict"),
+            _                            => (StatusCodes.Status500InternalServerError, "Internal Server Error")
         };
 
         if (statusCode == StatusCodes.Status500InternalServerError)

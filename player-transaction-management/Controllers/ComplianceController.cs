@@ -25,12 +25,15 @@ public class ComplianceController : ControllerBase
         return Ok(summary);
     }
 
-    /// <summary>Get all flagged transactions</summary>
+    /// <summary>Get flagged transactions (paginated)</summary>
     [HttpGet("flagged")]
-    [ProducesResponseType(typeof(IEnumerable<TransactionDto>), 200)]
-    public async Task<IActionResult> GetFlagged(CancellationToken ct)
+    [ProducesResponseType(typeof(PagedResult<TransactionDto>), 200)]
+    public async Task<IActionResult> GetFlagged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
-        var flagged = await _svc.GetFlaggedTransactionsAsync(ct);
+        var flagged = await _svc.GetFlaggedTransactionsAsync(page, pageSize, ct);
         return Ok(flagged);
     }
 
@@ -54,9 +57,4 @@ public class ComplianceController : ControllerBase
         var result = await _svc.ClearFlagAsync(transactionId, officerId, dto.Notes, ct);
         return Ok(result);
     }
-}
-
-public class ClearFlagDto
-{
-    public string Notes { get; set; } = string.Empty;
 }

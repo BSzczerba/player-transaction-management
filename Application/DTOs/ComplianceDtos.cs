@@ -18,6 +18,14 @@ public class FlaggedPlayerSummaryDto
     public string? LatestFlagReason { get; set; }
 }
 
+public class PlayerRiskStatsDto
+{
+    public int TotalTransactions { get; set; }
+    public int FlaggedTransactions { get; set; }
+    public decimal TotalDeposited { get; set; }
+    public decimal TotalWithdrawn { get; set; }
+}
+
 public class PlayerRiskProfileDto
 {
     public Guid PlayerId { get; set; }

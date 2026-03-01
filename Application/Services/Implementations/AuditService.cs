@@ -38,7 +38,6 @@ public class AuditService : IAuditService
         };
 
         await _uow.AuditLogs.AddAsync(auditLog, ct);
-        await _uow.SaveChangesAsync(ct);
 
         _log.LogDebug("Audit: {Action} by {UserId} on {EntityType}/{EntityId}",
             action, userId, entityType, entityId);

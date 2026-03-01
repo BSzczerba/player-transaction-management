@@ -63,6 +63,9 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
             .HasForeignKey(t => t.ApprovedById)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.Property(t => t.RowVersion)
+            .IsRowVersion();
+
         // Indexes for performance
         builder.HasIndex(t => t.PlayerId);
         builder.HasIndex(t => t.Status);

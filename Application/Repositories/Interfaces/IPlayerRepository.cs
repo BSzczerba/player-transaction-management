@@ -27,6 +27,11 @@ public interface IPlayerRepository : IRepository<Player>
     /// Check if username exists
     /// </summary>
     Task<bool> UsernameExistsAsync(string username, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get players by role
+    /// </summary>
+    Task<IEnumerable<Player>> GetByRoleAsync(Domain.Enums.UserRole role, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -63,6 +68,16 @@ public interface ITransactionRepository : IRepository<Transaction>
     /// Get filtered and paginated transactions
     /// </summary>
     Task<(IEnumerable<Transaction> Items, int TotalCount)> GetFilteredAsync(TransactionFilterDto filter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get compliance summary with SQL-level aggregation
+    /// </summary>
+    Task<ComplianceSummaryDto> GetComplianceSummaryAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get player risk stats with SQL-level aggregation
+    /// </summary>
+    Task<PlayerRiskStatsDto> GetPlayerRiskStatsAsync(Guid playerId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

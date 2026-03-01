@@ -1,4 +1,5 @@
 using Application.DTOs;
+using Application.Repositories.Interfaces;
 using Application.Services.Interfaces;
 using Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -15,12 +16,14 @@ public class AdminController : ControllerBase
 {
     private readonly IPlayerService _playerSvc;
     private readonly IAuditService _auditSvc;
+    private readonly IUnitOfWork _uow;
     private readonly ILogger<AdminController> _log;
 
-    public AdminController(IPlayerService playerSvc, IAuditService auditSvc, ILogger<AdminController> log)
+    public AdminController(IPlayerService playerSvc, IAuditService auditSvc, IUnitOfWork uow, ILogger<AdminController> log)
     {
         _playerSvc = playerSvc;
         _auditSvc = auditSvc;
+        _uow = uow;
         _log = log;
     }
 
@@ -31,26 +34,46 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> UpdateLimits(Guid playerId, [FromBody] UpdatePlayerLimitsDto dto, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
-        var result = await _playerSvc.UpdateLimitsAsync(playerId, dto, ct);
-
-        await _auditSvc.LogAsync(adminId, "UpdatePlayerLimits", "Player", playerId,
-            newValues: $"{{\"dailyDeposit\":{dto.DailyDepositLimit},\"dailyWithdrawal\":{dto.DailyWithdrawalLimit}}}",
-            ct: ct);
-
-        return Ok(result);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var result = await _playerSvc.UpdateLimitsAsync(playerId, dto, ct);
+            await _auditSvc.LogAsync(adminId, "UpdatePlayerLimits", "Player", playerId,
+                newValues: $"{{\"dailyDeposit\":{dto.DailyDepositLimit},\"dailyWithdrawal\":{dto.DailyWithdrawalLimit}}}",
+                ct: ct);
+            await _uow.CommitTransactionAsync(ct);
+            return Ok(result);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Suspend a player account</summary>
     [HttpPost("players/{playerId:guid}/suspend")]
     [ProducesResponseType(typeof(PlayerDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> SuspendPlayer(Guid playerId, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
-        var result = await _playerSvc.UpdateStatusAsync(playerId, AccountStatus.Suspended, ct);
+        if (playerId == adminId)
+            return BadRequest(new ProblemDetails { Detail = "Cannot suspend your own account." });
 
-        await _auditSvc.LogAsync(adminId, "SuspendPlayer", "Player", playerId, ct: ct);
-
-        return Ok(result);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var result = await _playerSvc.UpdateStatusAsync(playerId, AccountStatus.Suspended, ct);
+            await _auditSvc.LogAsync(adminId, "SuspendPlayer", "Player", playerId, ct: ct);
+            await _uow.CommitTransactionAsync(ct);
+            return Ok(result);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Activate a player account</summary>
@@ -59,38 +82,70 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> ActivatePlayer(Guid playerId, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
-        var result = await _playerSvc.UpdateStatusAsync(playerId, AccountStatus.Active, ct);
-
-        await _auditSvc.LogAsync(adminId, "ActivatePlayer", "Player", playerId, ct: ct);
-
-        return Ok(result);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var result = await _playerSvc.UpdateStatusAsync(playerId, AccountStatus.Active, ct);
+            await _auditSvc.LogAsync(adminId, "ActivatePlayer", "Player", playerId, ct: ct);
+            await _uow.CommitTransactionAsync(ct);
+            return Ok(result);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Close a player account</summary>
     [HttpPost("players/{playerId:guid}/close")]
     [ProducesResponseType(typeof(PlayerDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> ClosePlayer(Guid playerId, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
-        var result = await _playerSvc.UpdateStatusAsync(playerId, AccountStatus.Closed, ct);
+        if (playerId == adminId)
+            return BadRequest(new ProblemDetails { Detail = "Cannot close your own account." });
 
-        await _auditSvc.LogAsync(adminId, "ClosePlayer", "Player", playerId, ct: ct);
-
-        return Ok(result);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var result = await _playerSvc.UpdateStatusAsync(playerId, AccountStatus.Closed, ct);
+            await _auditSvc.LogAsync(adminId, "ClosePlayer", "Player", playerId, ct: ct);
+            await _uow.CommitTransactionAsync(ct);
+            return Ok(result);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Change a user's role</summary>
     [HttpPut("players/{playerId:guid}/role")]
     [ProducesResponseType(typeof(PlayerDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> UpdateRole(Guid playerId, [FromBody] UpdateRoleDto dto, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
-        var result = await _playerSvc.UpdateRoleAsync(playerId, dto.Role, ct);
+        if (playerId == adminId)
+            return BadRequest(new ProblemDetails { Detail = "Cannot change your own role." });
 
-        await _auditSvc.LogAsync(adminId, "UpdatePlayerRole", "Player", playerId,
-            newValues: $"{{\"role\":\"{dto.Role}\"}}", ct: ct);
-
-        return Ok(result);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var result = await _playerSvc.UpdateRoleAsync(playerId, dto.Role, ct);
+            await _auditSvc.LogAsync(adminId, "UpdatePlayerRole", "Player", playerId,
+                newValues: $"{{\"role\":\"{dto.Role}\"}}", ct: ct);
+            await _uow.CommitTransactionAsync(ct);
+            return Ok(result);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Set KYC verification status for a player</summary>
@@ -99,12 +154,20 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> SetKyc(Guid playerId, [FromBody] SetKycDto dto, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
-        var result = await _playerSvc.SetKycVerifiedAsync(playerId, dto.Verified, ct);
-
-        await _auditSvc.LogAsync(adminId, "SetKycVerification", "Player", playerId,
-            newValues: $"{{\"kycVerified\":{dto.Verified.ToString().ToLower()}}}", ct: ct);
-
-        return Ok(result);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var result = await _playerSvc.SetKycVerifiedAsync(playerId, dto.Verified, ct);
+            await _auditSvc.LogAsync(adminId, "SetKycVerification", "Player", playerId,
+                newValues: $"{{\"kycVerified\":{dto.Verified.ToString().ToLower()}}}", ct: ct);
+            await _uow.CommitTransactionAsync(ct);
+            return Ok(result);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
     }
 
     /// <summary>Get audit logs (filtered + paginated)</summary>
@@ -127,14 +190,4 @@ public class AdminController : ControllerBase
 
     private Guid GetCurrentUserId()
         => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-}
-
-public class UpdateRoleDto
-{
-    public UserRole Role { get; set; }
-}
-
-public class SetKycDto
-{
-    public bool Verified { get; set; }
 }

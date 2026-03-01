@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Application.Repositories.Interfaces;
 using Domain.Entities;
 using Domain.Enums;
@@ -19,6 +19,7 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
     public async Task<IEnumerable<Transaction>> GetByPlayerIdAsync(Guid playerId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Where(t => t.PlayerId == playerId)
             .Include(t => t.PaymentMethod)
             .Include(t => t.ApprovedBy)
@@ -29,6 +30,7 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
     public async Task<IEnumerable<Transaction>> GetPendingTransactionsAsync(CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Where(t => t.Status == TransactionStatus.Pending)
             .Include(t => t.Player)
             .Include(t => t.PaymentMethod)
@@ -39,6 +41,7 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
     public async Task<IEnumerable<Transaction>> GetFlaggedTransactionsAsync(CancellationToken cancellationToken = default)
     {
         return await _dbSet
+            .AsNoTracking()
             .Where(t => t.IsFlagged)
             .Include(t => t.Player)
             .Include(t => t.PaymentMethod)
@@ -52,6 +55,7 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
         var tomorrow = today.AddDays(1);
 
         return await _dbSet
+            .AsNoTracking()
             .Where(t => t.PlayerId == playerId &&
                        t.CreatedAt >= today &&
                        t.CreatedAt < tomorrow)
@@ -63,6 +67,7 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
         var threshold = DateTime.UtcNow.AddHours(-24);
 
         return await _dbSet
+            .AsNoTracking()
             .Where(t => t.PlayerId == playerId && t.CreatedAt >= threshold)
             .ToListAsync(cancellationToken);
     }
@@ -72,6 +77,7 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
         CancellationToken cancellationToken = default)
     {
         var query = _dbSet
+            .AsNoTracking()
             .Include(t => t.Player)
             .Include(t => t.PaymentMethod)
             .Include(t => t.ApprovedBy)
@@ -113,5 +119,60 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
             .ToListAsync(cancellationToken);
 
         return (items, totalCount);
+    }
+
+    public async Task<ComplianceSummaryDto> GetComplianceSummaryAsync(CancellationToken cancellationToken = default)
+    {
+        var summary = await _dbSet
+            .AsNoTracking()
+            .Where(t => t.IsFlagged)
+            .GroupBy(_ => 1)
+            .Select(g => new ComplianceSummaryDto
+            {
+                TotalFlaggedTransactions = g.Count(),
+                PendingReviewCount = g.Count(t => t.Status == TransactionStatus.Pending),
+                TotalFlaggedAmount = g.Sum(t => t.Amount),
+                FlaggedPlayersCount = g.Select(t => t.PlayerId).Distinct().Count()
+            })
+            .FirstOrDefaultAsync(cancellationToken) ?? new ComplianceSummaryDto();
+
+        // Top flagged players — limited to 10 at SQL level
+        summary.TopFlaggedPlayers = await _dbSet
+            .AsNoTracking()
+            .Where(t => t.IsFlagged)
+            .GroupBy(t => new { t.PlayerId, t.Player!.Username })
+            .Select(g => new FlaggedPlayerSummaryDto
+            {
+                PlayerId = g.Key.PlayerId,
+                Username = g.Key.Username,
+                FlaggedTransactionCount = g.Count(),
+                TotalFlaggedAmount = g.Sum(t => t.Amount),
+                LatestFlagReason = g.OrderByDescending(t => t.CreatedAt).First().FlagReason
+            })
+            .OrderByDescending(p => p.FlaggedTransactionCount)
+            .Take(10)
+            .ToListAsync(cancellationToken);
+
+        return summary;
+    }
+
+    public async Task<PlayerRiskStatsDto> GetPlayerRiskStatsAsync(Guid playerId, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .AsNoTracking()
+            .Where(t => t.PlayerId == playerId)
+            .GroupBy(_ => 1)
+            .Select(g => new PlayerRiskStatsDto
+            {
+                TotalTransactions = g.Count(),
+                FlaggedTransactions = g.Count(t => t.IsFlagged),
+                TotalDeposited = g
+                    .Where(t => t.Type == TransactionType.Deposit && t.Status == TransactionStatus.Completed)
+                    .Sum(t => t.Amount),
+                TotalWithdrawn = g
+                    .Where(t => t.Type == TransactionType.Withdrawal && t.Status == TransactionStatus.Completed)
+                    .Sum(t => t.Amount)
+            })
+            .FirstOrDefaultAsync(cancellationToken) ?? new PlayerRiskStatsDto();
     }
 }
