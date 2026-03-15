@@ -175,4 +175,143 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
             })
             .FirstOrDefaultAsync(cancellationToken) ?? new PlayerRiskStatsDto();
     }
+
+    // ── Reports ──────────────────────────────────────────────────────────────
+
+    public async Task<TransactionSummaryRawDto> GetFinancialSummaryRawAsync(
+        DateTime startDate, DateTime endDate, CancellationToken ct = default)
+    {
+        return await _dbSet
+            .AsNoTracking()
+            .Where(t => t.CreatedAt >= startDate && t.CreatedAt <= endDate)
+            .GroupBy(_ => 1)
+            .Select(g => new TransactionSummaryRawDto
+            {
+                TotalDeposits = g.Sum(t =>
+                    t.Type == TransactionType.Deposit && t.Status == TransactionStatus.Completed ? t.Amount : 0m),
+                TotalWithdrawals = g.Sum(t =>
+                    t.Type == TransactionType.Withdrawal && t.Status == TransactionStatus.Completed ? t.Amount : 0m),
+                CompletedCount = g.Count(t => t.Status == TransactionStatus.Completed),
+                PendingCount = g.Count(t => t.Status == TransactionStatus.Pending),
+                ProcessingCount = g.Count(t => t.Status == TransactionStatus.Processing),
+                RejectedCount = g.Count(t => t.Status == TransactionStatus.Rejected),
+                FlaggedCount = g.Count(t => t.IsFlagged),
+                TotalCount = g.Count()
+            })
+            .FirstOrDefaultAsync(ct) ?? new TransactionSummaryRawDto();
+    }
+
+    public async Task<IEnumerable<DailyTransactionStatsDto>> GetDailyStatsAsync(
+        DateTime startDate, DateTime endDate, CancellationToken ct = default)
+    {
+        return await _dbSet
+            .AsNoTracking()
+            .Where(t => t.CreatedAt >= startDate && t.CreatedAt <= endDate)
+            .GroupBy(t => t.CreatedAt.Date)
+            .Select(g => new DailyTransactionStatsDto
+            {
+                Date = g.Key,
+                Deposits = g.Sum(t =>
+                    t.Type == TransactionType.Deposit && t.Status == TransactionStatus.Completed ? t.Amount : 0m),
+                Withdrawals = g.Sum(t =>
+                    t.Type == TransactionType.Withdrawal && t.Status == TransactionStatus.Completed ? t.Amount : 0m),
+                TransactionCount = g.Count(),
+                FlaggedCount = g.Count(t => t.IsFlagged)
+            })
+            .OrderBy(d => d.Date)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<TopPlayerDto>> GetTopPlayersByVolumeAsync(
+        DateTime startDate, DateTime endDate, int limit, CancellationToken ct = default)
+    {
+        return await _dbSet
+            .AsNoTracking()
+            .Where(t => t.CreatedAt >= startDate && t.CreatedAt <= endDate
+                     && t.Status == TransactionStatus.Completed)
+            .GroupBy(t => new { t.PlayerId, t.Player!.Username, t.Player.Balance })
+            .Select(g => new TopPlayerDto
+            {
+                PlayerId = g.Key.PlayerId,
+                Username = g.Key.Username,
+                TotalVolume = g.Sum(t => t.Amount),
+                TransactionCount = g.Count(),
+                CurrentBalance = g.Key.Balance
+            })
+            .OrderByDescending(p => p.TotalVolume)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<PaymentMethodStatsDto>> GetPaymentMethodStatsAsync(
+        DateTime startDate, DateTime endDate, CancellationToken ct = default)
+    {
+        // Pull enum type as int from SQL, convert to string in memory
+        var raw = await _dbSet
+            .AsNoTracking()
+            .Where(t => t.CreatedAt >= startDate && t.CreatedAt <= endDate
+                     && t.PaymentMethodId != null)
+            .GroupBy(t => new { t.PaymentMethodId, t.PaymentMethod!.Name, t.PaymentMethod.Type })
+            .Select(g => new
+            {
+                PaymentMethodId = g.Key.PaymentMethodId!.Value,
+                g.Key.Name,
+                g.Key.Type,
+                TransactionCount = g.Count(),
+                TotalVolume = g.Sum(t => t.Amount),
+                AverageAmount = g.Average(t => t.Amount)
+            })
+            .OrderByDescending(p => p.TotalVolume)
+            .ToListAsync(ct);
+
+        return raw.Select(r => new PaymentMethodStatsDto
+        {
+            PaymentMethodId = r.PaymentMethodId,
+            Name = r.Name,
+            Type = r.Type.ToString(),
+            TransactionCount = r.TransactionCount,
+            TotalVolume = r.TotalVolume,
+            AverageAmount = r.AverageAmount
+        });
+    }
+
+    public async Task<IEnumerable<Transaction>> GetAllForExportAsync(
+        TransactionFilterDto filter, CancellationToken ct = default)
+    {
+        var query = _dbSet
+            .AsNoTracking()
+            .Include(t => t.Player)
+            .Include(t => t.PaymentMethod)
+            .Include(t => t.ApprovedBy)
+            .AsQueryable();
+
+        if (filter.PlayerId.HasValue)
+            query = query.Where(t => t.PlayerId == filter.PlayerId.Value);
+
+        if (filter.Type.HasValue)
+            query = query.Where(t => t.Type == filter.Type.Value);
+
+        if (filter.Status.HasValue)
+            query = query.Where(t => t.Status == filter.Status.Value);
+
+        if (filter.StartDate.HasValue)
+            query = query.Where(t => t.CreatedAt >= filter.StartDate.Value);
+
+        if (filter.EndDate.HasValue)
+            query = query.Where(t => t.CreatedAt <= filter.EndDate.Value);
+
+        if (filter.MinAmount.HasValue)
+            query = query.Where(t => t.Amount >= filter.MinAmount.Value);
+
+        if (filter.MaxAmount.HasValue)
+            query = query.Where(t => t.Amount <= filter.MaxAmount.Value);
+
+        if (filter.IsFlagged.HasValue)
+            query = query.Where(t => t.IsFlagged == filter.IsFlagged.Value);
+
+        return await query
+            .OrderByDescending(t => t.CreatedAt)
+            .Take(10_000) // safety cap for CSV export
+            .ToListAsync(ct);
+    }
 }

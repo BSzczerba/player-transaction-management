@@ -78,6 +78,23 @@ public interface ITransactionRepository : IRepository<Transaction>
     /// Get player risk stats with SQL-level aggregation
     /// </summary>
     Task<PlayerRiskStatsDto> GetPlayerRiskStatsAsync(Guid playerId, CancellationToken cancellationToken = default);
+
+    // ── Reports ──────────────────────────────────────────────────────────────
+
+    /// <summary>Aggregate financial totals for a date range.</summary>
+    Task<TransactionSummaryRawDto> GetFinancialSummaryRawAsync(DateTime startDate, DateTime endDate, CancellationToken ct = default);
+
+    /// <summary>Daily deposit/withdrawal/flag breakdown for a date range.</summary>
+    Task<IEnumerable<DailyTransactionStatsDto>> GetDailyStatsAsync(DateTime startDate, DateTime endDate, CancellationToken ct = default);
+
+    /// <summary>Top N players by completed transaction volume in the period.</summary>
+    Task<IEnumerable<TopPlayerDto>> GetTopPlayersByVolumeAsync(DateTime startDate, DateTime endDate, int limit, CancellationToken ct = default);
+
+    /// <summary>Per-payment-method transaction count, volume, and average for the period.</summary>
+    Task<IEnumerable<PaymentMethodStatsDto>> GetPaymentMethodStatsAsync(DateTime startDate, DateTime endDate, CancellationToken ct = default);
+
+    /// <summary>All transactions matching the filter (no pagination — for CSV export, capped at 10 000 rows).</summary>
+    Task<IEnumerable<Transaction>> GetAllForExportAsync(TransactionFilterDto filter, CancellationToken ct = default);
 }
 
 /// <summary>
