@@ -162,6 +162,7 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IComplianceService, ComplianceService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IPasswordHasher, Infrastructure.Services.BcryptPasswordHasher>();
+builder.Services.AddScoped<IPaymentGatewayService, Infrastructure.Services.MockPaymentGatewayService>();
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
 var app = builder.Build();

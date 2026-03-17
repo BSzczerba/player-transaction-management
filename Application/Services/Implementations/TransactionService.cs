@@ -19,6 +19,7 @@ public class TransactionService : ITransactionService
     private readonly ILogger<TransactionService> _log;
     private readonly IAuditService _audit;
     private readonly INotificationService _notifications;
+    private readonly IPaymentGatewayService _gateway;
 
     // AML thresholds (configurable via constructor or IOptions in future)
     private const int AmlVelocityThreshold = 5;
@@ -27,13 +28,14 @@ public class TransactionService : ITransactionService
     private const decimal AutoApproveDepositThreshold = 100m;
 
     public TransactionService(IUnitOfWork uow, IMapper mapper, ILogger<TransactionService> log,
-        IAuditService audit, INotificationService notifications)
+        IAuditService audit, INotificationService notifications, IPaymentGatewayService gateway)
     {
         _uow = uow;
         _mapper = mapper;
         _log = log;
         _audit = audit;
         _notifications = notifications;
+        _gateway = gateway;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -243,44 +245,72 @@ public class TransactionService : ITransactionService
             var player = await _uow.Players.GetByIdAsync(transaction.PlayerId, ct)
                 ?? throw new InvalidOperationException("Player not found.");
 
-            if (transaction.Type == TransactionType.Deposit)
-            {
-                player.Balance += transaction.Amount;
-            }
-            else if (transaction.Type == TransactionType.Withdrawal)
-            {
-                if (player.Balance < transaction.Amount)
-                    throw new InvalidOperationException(
-                        "Insufficient balance. Player balance may have changed.");
-
-                player.Balance -= transaction.Amount;
-            }
-
-            transaction.Status = TransactionStatus.Completed;
-            transaction.CompletedAt = DateTime.UtcNow;
             transaction.ApprovedById = operatorId;
             transaction.ApprovedAt = DateTime.UtcNow;
-            transaction.BalanceAfter = player.Balance;
+            transaction.Status = TransactionStatus.Processing;
 
             if (!string.IsNullOrEmpty(notes))
                 transaction.Description = (transaction.Description ?? "") + " [Operator notes: " + notes + "]";
 
+            // Submit to payment gateway
+            var paymentMethodType = transaction.PaymentMethod?.Type.ToString() ?? "BankTransfer";
+            var gatewayResult = await _gateway.ProcessPaymentAsync(
+                transaction.Id, transaction.Amount, paymentMethodType, ct);
+
+            if (gatewayResult.Success)
+            {
+                if (transaction.Type == TransactionType.Deposit)
+                {
+                    player.Balance += transaction.Amount;
+                }
+                else if (transaction.Type == TransactionType.Withdrawal)
+                {
+                    if (player.Balance < transaction.Amount)
+                        throw new InvalidOperationException(
+                            "Insufficient balance. Player balance may have changed.");
+
+                    player.Balance -= transaction.Amount;
+                }
+
+                transaction.Status = TransactionStatus.Completed;
+                transaction.CompletedAt = DateTime.UtcNow;
+                transaction.BalanceAfter = player.Balance;
+                transaction.PaymentGatewayReference = gatewayResult.GatewayTransactionId;
+
+                _uow.Players.Update(player);
+
+                await _notifications.CreateAsync(
+                    player.Id,
+                    "TransactionUpdate",
+                    "Transaction Approved",
+                    $"Your {transaction.Type} of {transaction.Amount:C} has been approved and processed.",
+                    "Transaction", transaction.Id, ct);
+
+                _log.LogInformation(
+                    "Transaction {TransactionId} approved and completed by operator {OperatorId}. Gateway ref: {GatewayRef}",
+                    transactionId, operatorId, gatewayResult.GatewayTransactionId);
+            }
+            else
+            {
+                transaction.Status = TransactionStatus.Failed;
+                transaction.BalanceAfter = transaction.BalanceBefore;
+                transaction.Description += $" [Gateway error: {gatewayResult.ErrorCode} – {gatewayResult.ErrorMessage}]";
+
+                await _notifications.CreateAsync(
+                    player.Id,
+                    "TransactionUpdate",
+                    "Transaction Processing Failed",
+                    $"Your {transaction.Type} of {transaction.Amount:C} could not be processed: {gatewayResult.ErrorMessage}",
+                    "Transaction", transaction.Id, ct);
+
+                _log.LogWarning(
+                    "Transaction {TransactionId} approved by operator {OperatorId} but gateway returned failure: [{ErrorCode}] {ErrorMessage}",
+                    transactionId, operatorId, gatewayResult.ErrorCode, gatewayResult.ErrorMessage);
+            }
+
             _uow.Transactions.Update(transaction);
-            _uow.Players.Update(player);
-
             await _audit.LogAsync(operatorId, "ApproveTransaction", "Transaction", transactionId, ct: ct);
-
-            await _notifications.CreateAsync(
-                player.Id,
-                "TransactionUpdate",
-                "Transaction Approved",
-                $"Your {transaction.Type} of {transaction.Amount:C} has been approved.",
-                "Transaction", transaction.Id, ct);
-
             await _uow.CommitTransactionAsync(ct);
-
-            _log.LogInformation("Transaction {TransactionId} approved by operator {OperatorId}",
-                transactionId, operatorId);
 
             return _mapper.Map<TransactionDto>(transaction);
         }
