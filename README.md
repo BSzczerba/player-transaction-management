@@ -3,7 +3,7 @@
 Enterprise-grade REST API for managing financial transactions on gaming platforms. Built with **ASP.NET Core 10**, **Entity Framework Core 10**, and **SQL Server**, following **Clean Architecture** principles.
 
 ![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)
-![Build](https://github.com/YOUR_USERNAME/player-transaction-management/actions/workflows/ci.yml/badge.svg)
+![Build](https://github.com/BSzczerba/player-transaction-management/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
