@@ -1,5 +1,5 @@
 # ─── Build stage ──────────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Copy project files first for layer caching (restore only reruns when .csproj changes)
@@ -16,11 +16,11 @@ RUN dotnet publish player-transaction-management/player-transaction-management.c
     -c Release -o /app/publish --no-restore
 
 # ─── Runtime stage ────────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # Create non-root user for security
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+RUN useradd --no-create-home --shell /bin/false appuser && chown -R appuser /app
 USER appuser
 
 EXPOSE 8080

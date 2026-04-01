@@ -1,8 +1,8 @@
 # Player Transaction Management API
 
-Enterprise-grade REST API for managing financial transactions on gaming platforms. Built with **ASP.NET Core 8**, **Entity Framework Core**, and **SQL Server**, following **Clean Architecture** principles.
+Enterprise-grade REST API for managing financial transactions on gaming platforms. Built with **ASP.NET Core 10**, **Entity Framework Core 10**, and **SQL Server**, following **Clean Architecture** principles.
 
-![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
+![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)
 ![Build](https://github.com/YOUR_USERNAME/player-transaction-management/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -58,8 +58,8 @@ Clean Architecture with four layers (dependencies flow inward):
 
 | Component | Technology |
 |---|---|
-| Framework | ASP.NET Core 8.0 |
-| ORM | Entity Framework Core 8 + SQL Server |
+| Framework | ASP.NET Core 10.0 |
+| ORM | Entity Framework Core 10 + SQL Server |
 | Authentication | JWT Bearer (`Microsoft.AspNetCore.Authentication.JwtBearer`) |
 | Password hashing | BCrypt.Net-Next |
 | Mapping | AutoMapper 12 |
@@ -76,7 +76,7 @@ Clean Architecture with four layers (dependencies flow inward):
 
 ### Prerequisites
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - SQL Server on `localhost:1433` (credentials from `appsettings.json`), **or** Docker
 
 ### Option A — Run locally
