@@ -3,6 +3,7 @@ using Domain.Enums;
 using Infrastructure.Data;
 using Application.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using AccountStatus = Domain.Enums.AccountStatus;
 
 namespace Infrastructure.Repositories.Implementations;
 
@@ -56,4 +57,16 @@ public class PlayerRepository : Repository<Player>, IPlayerRepository
             .Where(p => p.Role == role)
             .ToListAsync(cancellationToken);
     }
+
+    public Task<int> CountByStatusAsync(AccountStatus status, CancellationToken ct = default)
+        => _dbSet.CountAsync(p => p.Status == status, ct);
+
+    public Task<int> CountKycVerifiedAsync(CancellationToken ct = default)
+        => _dbSet.CountAsync(p => p.KycVerified, ct);
+
+    public Task<int> CountTotalAsync(CancellationToken ct = default)
+        => _dbSet.CountAsync(ct);
+
+    public Task<int> CountNewInPeriodAsync(DateTime start, DateTime end, CancellationToken ct = default)
+        => _dbSet.CountAsync(p => p.CreatedAt >= start && p.CreatedAt <= end, ct);
 }

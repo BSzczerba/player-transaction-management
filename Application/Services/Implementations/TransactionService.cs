@@ -97,14 +97,31 @@ public class TransactionService : ITransactionService
                 _log.LogWarning("Suspicious deposit detected for player {PlayerId}: {Amount}", playerId, dto.Amount);
             }
 
-            // Auto-approve only if NOT flagged AND below threshold
+            // Auto-approve only if NOT flagged AND below threshold — still routed through payment gateway
             if (dto.Amount < AutoApproveDepositThreshold && !isSuspicious)
             {
-                transaction.Status = TransactionStatus.Completed;
-                transaction.CompletedAt = DateTime.UtcNow;
-                player.Balance += dto.Amount;
-                _uow.Players.Update(player);
-                _log.LogInformation("Auto-approved deposit of {Amount} for player {PlayerId}", dto.Amount, playerId);
+                transaction.Status = TransactionStatus.Processing;
+                var gatewayResult = await _gateway.ProcessPaymentAsync(
+                    transaction.Id, transaction.Amount, paymentMethod.Type.ToString(), ct);
+
+                if (gatewayResult.Success)
+                {
+                    transaction.Status = TransactionStatus.Completed;
+                    transaction.CompletedAt = DateTime.UtcNow;
+                    transaction.PaymentGatewayReference = gatewayResult.GatewayTransactionId;
+                    player.Balance += dto.Amount;
+                    _uow.Players.Update(player);
+                    _log.LogInformation("Auto-approved deposit of {Amount} for player {PlayerId}. Gateway ref: {GatewayRef}",
+                        dto.Amount, playerId, gatewayResult.GatewayTransactionId);
+                }
+                else
+                {
+                    transaction.Status = TransactionStatus.Failed;
+                    transaction.BalanceAfter = transaction.BalanceBefore;
+                    transaction.Description += $" [Gateway error: {gatewayResult.ErrorCode} – {gatewayResult.ErrorMessage}]";
+                    _log.LogWarning("Auto-approved deposit of {Amount} for player {PlayerId} failed at gateway: [{ErrorCode}] {ErrorMessage}",
+                        dto.Amount, playerId, gatewayResult.ErrorCode, gatewayResult.ErrorMessage);
+                }
             }
             else
             {
@@ -245,6 +262,10 @@ public class TransactionService : ITransactionService
             var player = await _uow.Players.GetByIdAsync(transaction.PlayerId, ct)
                 ?? throw new InvalidOperationException("Player not found.");
 
+            if (player.Status != AccountStatus.Active)
+                throw new InvalidOperationException(
+                    $"Cannot approve transaction for player with account status {player.Status}.");
+
             transaction.ApprovedById = operatorId;
             transaction.ApprovedAt = DateTime.UtcNow;
             transaction.Status = TransactionStatus.Processing;
@@ -252,8 +273,11 @@ public class TransactionService : ITransactionService
             if (!string.IsNullOrEmpty(notes))
                 transaction.Description = (transaction.Description ?? "") + " [Operator notes: " + notes + "]";
 
-            // Submit to payment gateway
-            var paymentMethodType = transaction.PaymentMethod?.Type.ToString() ?? "BankTransfer";
+            // Load payment method to determine gateway routing — GetByIdAsync does not include navigation properties.
+            var paymentMethod = transaction.PaymentMethodId.HasValue
+                ? await _uow.PaymentMethods.GetByIdAsync(transaction.PaymentMethodId.Value, ct)
+                : null;
+            var paymentMethodType = paymentMethod?.Type.ToString() ?? "BankTransfer";
             var gatewayResult = await _gateway.ProcessPaymentAsync(
                 transaction.Id, transaction.Amount, paymentMethodType, ct);
 

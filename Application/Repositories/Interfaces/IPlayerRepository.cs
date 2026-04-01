@@ -32,6 +32,18 @@ public interface IPlayerRepository : IRepository<Player>
     /// Get players by role
     /// </summary>
     Task<IEnumerable<Player>> GetByRoleAsync(Domain.Enums.UserRole role, CancellationToken cancellationToken = default);
+
+    /// <summary>SQL-level count by account status (avoids loading all entities into memory).</summary>
+    Task<int> CountByStatusAsync(Domain.Enums.AccountStatus status, CancellationToken ct = default);
+
+    /// <summary>SQL-level count of KYC-verified players.</summary>
+    Task<int> CountKycVerifiedAsync(CancellationToken ct = default);
+
+    /// <summary>SQL-level total player count.</summary>
+    Task<int> CountTotalAsync(CancellationToken ct = default);
+
+    /// <summary>SQL-level count of players registered within the given UTC range.</summary>
+    Task<int> CountNewInPeriodAsync(DateTime start, DateTime end, CancellationToken ct = default);
 }
 
 /// <summary>

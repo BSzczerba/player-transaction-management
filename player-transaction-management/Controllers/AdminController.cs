@@ -34,6 +34,9 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> UpdateLimits(Guid playerId, [FromBody] UpdatePlayerLimitsDto dto, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
+        if (playerId == adminId)
+            return BadRequest(new ProblemDetails { Detail = "Cannot modify your own transaction limits." });
+
         await _uow.BeginTransactionAsync(ct);
         try
         {
@@ -151,9 +154,13 @@ public class AdminController : ControllerBase
     /// <summary>Set KYC verification status for a player</summary>
     [HttpPost("players/{playerId:guid}/kyc")]
     [ProducesResponseType(typeof(PlayerDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> SetKyc(Guid playerId, [FromBody] SetKycDto dto, CancellationToken ct)
     {
         var adminId = GetCurrentUserId();
+        if (playerId == adminId)
+            return BadRequest(new ProblemDetails { Detail = "Cannot set KYC verification on your own account." });
+
         await _uow.BeginTransactionAsync(ct);
         try
         {

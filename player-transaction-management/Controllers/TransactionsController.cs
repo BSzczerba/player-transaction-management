@@ -102,6 +102,7 @@ public class TransactionsController : ControllerBase
 
     /// <summary>Create a deposit</summary>
     [HttpPost("deposit")]
+    [Authorize(Roles = "Player")]
     [ProducesResponseType(typeof(TransactionDto), 201)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> CreateDeposit([FromBody] CreateDepositDto dto, CancellationToken ct)
@@ -116,6 +117,7 @@ public class TransactionsController : ControllerBase
 
     /// <summary>Create a withdrawal</summary>
     [HttpPost("withdraw")]
+    [Authorize(Roles = "Player")]
     [ProducesResponseType(typeof(TransactionDto), 201)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     public async Task<IActionResult> CreateWithdrawal([FromBody] CreateWithdrawalDto dto, CancellationToken ct)

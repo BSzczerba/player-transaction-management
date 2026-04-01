@@ -86,6 +86,11 @@ public class TransactionServiceTests
             It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid?>(),
             It.IsAny<CancellationToken>())).ReturnsAsync(new Application.DTOs.NotificationDto());
 
+        // Gateway — default success; individual tests override for failure scenarios
+        _gateway.Setup(g => g.ProcessPaymentAsync(
+            It.IsAny<Guid>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PaymentGatewayResult.Succeeded("PAY-TEST-DEFAULT"));
+
         // AutoMapper — real profile so DTO mapping is tested accurately
         var config = new MapperConfiguration(cfg => cfg.AddProfile<Application.Mappings.MappingProfile>());
         _mapper = config.CreateMapper();

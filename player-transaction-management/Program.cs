@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Application.Services.Implementations;
 using Application.Services.Interfaces;
 using FluentValidation;
+using FluentValidation.AspNetCore;
 using Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
@@ -149,6 +150,7 @@ builder.Services.AddProblemDetails();
 
 // ─── Application Services ────────────────────────────────────────────────────
 builder.Services.AddAutoMapper(typeof(Application.Mappings.MappingProfile).Assembly);
+builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<Application.Validators.RegisterDtoValidator>();
 
 builder.Services.AddScoped<Application.Repositories.Interfaces.IUnitOfWork, Infrastructure.Repositories.Implementations.UnitOfWork>();

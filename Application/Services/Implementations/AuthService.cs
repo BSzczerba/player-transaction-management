@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Application.Services.Implementations;
@@ -54,10 +55,20 @@ public class AuthService : IAuthService
             ActivationTokenExpiry = DateTime.UtcNow.AddHours(24)
         };
 
-        await _uow.Players.AddAsync(player, ct);
-        await _uow.SaveChangesAsync(ct);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            await _uow.Players.AddAsync(player, ct);
+            await _uow.CommitTransactionAsync(ct);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
 
-        var response = BuildAuthResponse(player);
+        // No refresh token at registration — account requires activation first.
+        var response = BuildAuthResponse(player, string.Empty);
         // Return the activation token in the response so the caller can simulate the email flow.
         // In production this would be sent via email and NOT included in the API response.
         response.ActivationToken = activationToken;
@@ -81,11 +92,21 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("Account is closed.");
 
         player.LastLoginAt = DateTime.UtcNow;
-        StoreRefreshToken(player);
-        _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        var rawRefreshToken = StoreRefreshToken(player);
 
-        return BuildAuthResponse(player);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            _uow.Players.Update(player);
+            await _uow.CommitTransactionAsync(ct);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
+
+        return BuildAuthResponse(player, rawRefreshToken);
     }
 
     // ─── RefreshToken ────────────────────────────────────────────────────────
@@ -110,18 +131,28 @@ public class AuthService : IAuthService
         var player = await _uow.Players.GetByIdAsync(playerId, ct)
             ?? throw new UnauthorizedAccessException("Player not found.");
 
-        if (player.RefreshToken != dto.RefreshToken ||
+        if (player.RefreshToken != HashToken(dto.RefreshToken) ||
             player.RefreshTokenExpiry is null ||
             player.RefreshTokenExpiry <= DateTime.UtcNow)
         {
             throw new UnauthorizedAccessException("Refresh token is invalid or has expired.");
         }
 
-        StoreRefreshToken(player);
-        _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        var rawRefreshToken = StoreRefreshToken(player);
 
-        return BuildAuthResponse(player);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            _uow.Players.Update(player);
+            await _uow.CommitTransactionAsync(ct);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
+
+        return BuildAuthResponse(player, rawRefreshToken);
     }
 
     // ─── ActivateAccount ─────────────────────────────────────────────────────
@@ -144,8 +175,17 @@ public class AuthService : IAuthService
         player.ActivationToken = null;
         player.ActivationTokenExpiry = null;
 
-        _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            _uow.Players.Update(player);
+            await _uow.CommitTransactionAsync(ct);
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync(ct);
+            throw;
+        }
 
         return true;
     }
@@ -165,27 +205,36 @@ public class AuthService : IAuthService
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
-    private AuthResponseDto BuildAuthResponse(Player player)
+    private AuthResponseDto BuildAuthResponse(Player player, string rawRefreshToken)
     {
         var (token, expires) = GenerateJwt(player);
 
         return new AuthResponseDto
         {
             Token = token,
-            RefreshToken = player.RefreshToken ?? string.Empty,
+            RefreshToken = rawRefreshToken,
             ExpiresAt = expires,
             User = _mapper.Map<PlayerDto>(player)
         };
     }
 
     /// <summary>
-    /// Generates a new opaque refresh token and persists it in the player entity.
-    /// NOTE: In production the token should be hashed before storage (e.g. SHA-256).
+    /// Generates a new opaque refresh token, stores its SHA-256 hash in the player entity,
+    /// and returns the raw token to be sent to the client.
+    /// The raw token is never persisted — only the hash is stored.
     /// </summary>
-    private static void StoreRefreshToken(Player player)
+    private static string StoreRefreshToken(Player player)
     {
-        player.RefreshToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+        var rawToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+        player.RefreshToken = HashToken(rawToken);
         player.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+        return rawToken;
+    }
+
+    private static string HashToken(string token)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     private (string Token, DateTime Expires) GenerateJwt(Player player)

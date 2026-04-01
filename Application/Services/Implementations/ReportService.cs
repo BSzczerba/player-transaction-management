@@ -3,6 +3,7 @@ using Application.Repositories.Interfaces;
 using Application.Services.Interfaces;
 using Domain.Enums;
 using System.Text;
+using AccountStatus = Domain.Enums.AccountStatus;
 
 namespace Application.Services.Implementations;
 
@@ -50,17 +51,23 @@ public class ReportService : IReportService
     {
         var (start, end) = NormalizeDateRange(filter);
 
-        var players = (await _uow.Players.GetAllAsync(ct)).ToList();
+        // SQL-level counts executed sequentially — EF Core DbContext is not thread-safe.
+        var total      = await _uow.Players.CountTotalAsync(ct);
+        var active     = await _uow.Players.CountByStatusAsync(AccountStatus.Active, ct);
+        var suspended  = await _uow.Players.CountByStatusAsync(AccountStatus.Suspended, ct);
+        var closed     = await _uow.Players.CountByStatusAsync(AccountStatus.Closed, ct);
+        var kyc        = await _uow.Players.CountKycVerifiedAsync(ct);
+        var newPlayers = await _uow.Players.CountNewInPeriodAsync(start, end, ct);
         var topPlayers = await _uow.Transactions.GetTopPlayersByVolumeAsync(start, end, 10, ct);
 
         return new PlayerActivityReportDto
         {
-            TotalPlayers = players.Count,
-            ActivePlayers = players.Count(p => p.Status == AccountStatus.Active),
-            SuspendedPlayers = players.Count(p => p.Status == AccountStatus.Suspended),
-            ClosedPlayers = players.Count(p => p.Status == AccountStatus.Closed),
-            KycVerifiedPlayers = players.Count(p => p.KycVerified),
-            NewPlayersInPeriod = players.Count(p => p.CreatedAt >= start && p.CreatedAt <= end),
+            TotalPlayers = total,
+            ActivePlayers = active,
+            SuspendedPlayers = suspended,
+            ClosedPlayers = closed,
+            KycVerifiedPlayers = kyc,
+            NewPlayersInPeriod = newPlayers,
             TopPlayersByVolume = topPlayers
         };
     }

@@ -63,7 +63,7 @@ Clean Architecture with four layers (dependencies flow inward):
 | Authentication | JWT Bearer (`Microsoft.AspNetCore.Authentication.JwtBearer`) |
 | Password hashing | BCrypt.Net-Next |
 | Mapping | AutoMapper 12 |
-| Validation | FluentValidation 12 |
+| Validation | FluentValidation 11 |
 | Logging | Serilog (console + rolling file) |
 | API docs | Swashbuckle / Swagger |
 | Testing | xUnit + Moq + FluentAssertions |
@@ -107,7 +107,11 @@ In **Development** mode, migrations are applied and the database is seeded autom
 ### Option B — Docker Compose (recommended)
 
 ```bash
-# Build and start API + SQL Server
+# 1. Copy the env template and fill in your secrets
+cp .env.example .env
+# Edit .env — set SA_PASSWORD and JWT_SECRET
+
+# 2. Build and start API + SQL Server
 docker compose up --build
 
 # API:     http://localhost:5235
@@ -115,6 +119,8 @@ docker compose up --build
 ```
 
 The `api` container waits for SQL Server to pass its health check before starting. Migrations and seeding run automatically (the container uses `ASPNETCORE_ENVIRONMENT=Development`).
+
+> **Note:** `.env` is git-ignored. Never commit it. See `.env.example` for the required variables.
 
 **Stop and clean up:**
 ```bash
@@ -136,7 +142,7 @@ dotnet test Tests/Tests.csproj \
   --results-directory ./TestResults
 ```
 
-The test suite (`Tests/Services/TransactionServiceTests.cs`) covers 20 scenarios:
+The test suite (`Tests/Services/TransactionServiceTests.cs`) covers 40 scenarios:
 
 | Category | Tests |
 |---|---|
@@ -301,10 +307,10 @@ After first startup (Development mode), the database is seeded with:
 
 | Role | Email | Password |
 |---|---|---|
-| Administrator | `admin@test.com` | `Admin123!` |
-| Operator | `operator@test.com` | `Admin123!` |
-| ComplianceOfficer | `compliance@test.com` | `Admin123!` |
-| Player | `player@test.com` | `Admin123!` |
+| Administrator | `admin@test.com` | `TestPass123!` |
+| Operator | `operator@test.com` | `TestPass123!` |
+| ComplianceOfficer | `compliance@test.com` | `TestPass123!` |
+| Player | `player@test.com` | `TestPass123!` |
 
 > **Note:** These credentials are for development/demo purposes only.
 

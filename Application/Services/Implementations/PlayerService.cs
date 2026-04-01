@@ -60,7 +60,8 @@ public class PlayerService : IPlayerService
         player.DailyWithdrawalLimit = dto.DailyWithdrawalLimit;
 
         _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        // Caller (AdminController) manages the transaction and calls CommitTransactionAsync,
+        // which internally calls SaveChangesAsync before committing.
 
         _log.LogInformation("Player {PlayerId} limits updated: deposit={DepositLimit}, withdrawal={WithdrawalLimit}",
             playerId, dto.DailyDepositLimit, dto.DailyWithdrawalLimit);
@@ -77,7 +78,7 @@ public class PlayerService : IPlayerService
         player.Status = newStatus;
 
         _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        // Caller (AdminController) manages the transaction.
 
         _log.LogInformation("Player {PlayerId} status changed from {OldStatus} to {NewStatus}",
             playerId, oldStatus, newStatus);
@@ -94,7 +95,7 @@ public class PlayerService : IPlayerService
         player.Role = newRole;
 
         _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        // Caller (AdminController) manages the transaction.
 
         _log.LogInformation("Player {PlayerId} role changed from {OldRole} to {NewRole}",
             playerId, oldRole, newRole);
@@ -110,7 +111,7 @@ public class PlayerService : IPlayerService
         player.KycVerified = verified;
 
         _uow.Players.Update(player);
-        await _uow.SaveChangesAsync(ct);
+        // Caller (AdminController) manages the transaction.
 
         _log.LogInformation("Player {PlayerId} KYC verification set to {Verified}", playerId, verified);
 

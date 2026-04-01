@@ -42,7 +42,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         {
             Status = statusCode,
             Title = title,
-            Detail = exception.Message,
+            Detail = statusCode == StatusCodes.Status500InternalServerError
+                ? "An unexpected error occurred. Please try again later."
+                : exception.Message,
             Instance = context.Request.Path
         };
 
