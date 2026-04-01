@@ -597,6 +597,495 @@ public class TransactionServiceTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    // CREATE DEPOSIT — player / payment-method guards
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task CreateDepositAsync_PlayerNotFound_Throws()
+    {
+        // Arrange
+        _players.Setup(r => r.GetByIdAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Player?)null);
+
+        var dto = new CreateDepositDto { Amount = 50m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task CreateDepositAsync_PaymentMethodNotFound_Throws()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        _paymentMethods.Setup(r => r.GetByIdAsync(PaymentMethodId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PaymentMethod?)null);
+
+        var dto = new CreateDepositDto { Amount = 50m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task CreateDepositAsync_InactivePaymentMethod_Throws()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(new PaymentMethod
+        {
+            Id = PaymentMethodId, Name = "Visa", Type = PaymentMethodType.CreditCard,
+            IsActive = false, MinAmount = 10m, MaxAmount = 5_000m
+        });
+
+        var dto = new CreateDepositDto { Amount = 50m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not active*");
+    }
+
+    [Fact]
+    public async Task CreateDepositAsync_AmountAbovePaymentMethodMax_Throws()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod); // MaxAmount = 5 000
+
+        var dto = new CreateDepositDto { Amount = 6_000m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*between*");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // CREATE DEPOSIT — AML boundary & auto-approve interaction
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task CreateDepositAsync_AmlFlagged_BelowAutoApproveThreshold_StillPending()
+    {
+        // AML flag must prevent auto-approve even when amount < 100
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod);
+
+        var recentTxns = Enumerable.Range(0, 5)
+            .Select(_ => new Transaction
+            {
+                Amount = 20m, Type = TransactionType.Deposit,
+                Status = TransactionStatus.Completed, PlayerId = PlayerId
+            })
+            .ToList();
+
+        _transactions.Setup(r => r.GetLast24HoursTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(recentTxns);
+        _transactions.Setup(r => r.GetTodaysTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(recentTxns);
+        _transactions.Setup(r => r.AddAsync(It.IsAny<Transaction>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Transaction t, CancellationToken _) => t);
+        _uow.Setup(u => u.Players.GetByRoleAsync(UserRole.ComplianceOfficer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var dto = new CreateDepositDto { Amount = 20m, PaymentMethodId = PaymentMethodId };
+        var balanceBefore = player.Balance;
+
+        // Act
+        var result = await _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        result.IsFlagged.Should().BeTrue();
+        result.Status.Should().Be("Pending"); // NOT auto-approved despite amount < 100
+        player.Balance.Should().Be(balanceBefore, "balance must not be updated for a flagged pending transaction");
+    }
+
+    [Fact]
+    public async Task CreateDepositAsync_ExactlyAtAmlSingleAmountThreshold_DoesNotFlag()
+    {
+        // 10 000 exactly must NOT trigger AML — the guard is strictly >, not >=
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer, balance: 100_000m, dailyDepositLimit: 100_000m);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(new PaymentMethod
+        {
+            Id = PaymentMethodId, Name = "Bank", Type = PaymentMethodType.BankTransfer,
+            IsActive = true, MinAmount = 0m, MaxAmount = 50_000m
+        });
+        SetupEmptyTransactionHistory();
+
+        var dto = new CreateDepositDto { Amount = 10_000m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var result = await _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        result.IsFlagged.Should().BeFalse();
+        result.FlagReason.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task CreateDepositAsync_AutoApproved_UpdatesPlayerBalance()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        var balanceBefore = player.Balance;
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod);
+        SetupEmptyTransactionHistory();
+
+        var dto = new CreateDepositDto { Amount = 50m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        await _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        player.Balance.Should().Be(balanceBefore + 50m);
+        _players.Verify(r => r.Update(player), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateDepositAsync_AuditLogCreated()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod);
+        SetupEmptyTransactionHistory();
+
+        var dto = new CreateDepositDto { Amount = 50m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        await _sut.CreateDepositAsync(PlayerId, dto, null);
+
+        // Assert
+        _audit.Verify(a => a.LogAsync(
+            PlayerId, "CreateDeposit", "Transaction", It.IsAny<Guid?>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // CREATE WITHDRAWAL — additional validation failures
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task CreateWithdrawalAsync_SuspendedAccount_Throws()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer, status: AccountStatus.Suspended);
+        SetupPlayerRepo(player);
+
+        var dto = new CreateWithdrawalDto { Amount = 100m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateWithdrawalAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*status*");
+    }
+
+    [Fact]
+    public async Task CreateWithdrawalAsync_AmountAbovePaymentMethodMax_Throws()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod); // MaxAmount = 5 000
+
+        var dto = new CreateWithdrawalDto { Amount = 6_000m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateWithdrawalAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*between*");
+    }
+
+    [Fact]
+    public async Task CreateWithdrawalAsync_DailyWithdrawalLimitExceeded_Throws()
+    {
+        // Arrange — player already withdrew 400 today, limit is 500
+        var player = ClonePlayer(ActiveKycPlayer, dailyWithdrawalLimit: 500m);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod);
+
+        var existingWithdrawals = new List<Transaction>
+        {
+            new()
+            {
+                Amount = 400m, Type = TransactionType.Withdrawal,
+                Status = TransactionStatus.Completed, PlayerId = PlayerId
+            }
+        };
+        _transactions.Setup(r => r.GetTodaysTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingWithdrawals);
+        _transactions.Setup(r => r.GetLast24HoursTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var dto = new CreateWithdrawalDto { Amount = 200m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var act = () => _sut.CreateWithdrawalAsync(PlayerId, dto, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*limit*");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // CREATE WITHDRAWAL — AML detection
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task CreateWithdrawalAsync_AmlVelocity_FlagsAndStaysPending()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(CreditCardMethod);
+
+        var recentTxns = Enumerable.Range(0, 5)
+            .Select(_ => new Transaction
+            {
+                Amount = 20m, Type = TransactionType.Deposit,
+                Status = TransactionStatus.Completed, PlayerId = PlayerId
+            })
+            .ToList();
+
+        _transactions.Setup(r => r.GetLast24HoursTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(recentTxns);
+        _transactions.Setup(r => r.GetTodaysTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _transactions.Setup(r => r.AddAsync(It.IsAny<Transaction>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Transaction t, CancellationToken _) => t);
+        _uow.Setup(u => u.Players.GetByRoleAsync(UserRole.ComplianceOfficer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var dto = new CreateWithdrawalDto { Amount = 100m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        var result = await _sut.CreateWithdrawalAsync(PlayerId, dto, null);
+
+        // Assert
+        result.IsFlagged.Should().BeTrue();
+        result.Status.Should().Be("Pending");
+    }
+
+    [Fact]
+    public async Task CreateWithdrawalAsync_AmlFlagged_NotifiesAllComplianceOfficers()
+    {
+        // Arrange — amount > 10 000 triggers AML single-amount check
+        var player = ClonePlayer(ActiveKycPlayer, balance: 100_000m, dailyWithdrawalLimit: 100_000m);
+        SetupPlayerRepo(player);
+        SetupPaymentMethodRepo(new PaymentMethod
+        {
+            Id = PaymentMethodId, Name = "Bank", Type = PaymentMethodType.BankTransfer,
+            IsActive = true, MinAmount = 0m, MaxAmount = 50_000m
+        });
+        SetupEmptyTransactionHistory();
+
+        var officer = new Player { Id = Guid.NewGuid(), Username = "compliance1", RowVersion = [1] };
+        _uow.Setup(u => u.Players.GetByRoleAsync(UserRole.ComplianceOfficer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([officer]);
+
+        var dto = new CreateWithdrawalDto { Amount = 12_000m, PaymentMethodId = PaymentMethodId };
+
+        // Act
+        await _sut.CreateWithdrawalAsync(PlayerId, dto, null);
+
+        // Assert
+        _notifications.Verify(n => n.CreateAsync(
+            officer.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // APPROVE — additional cases
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ApproveAsync_TransactionNotFound_Throws()
+    {
+        // Arrange
+        var nonExistentId = Guid.NewGuid();
+        _transactions.Setup(r => r.GetByIdAsync(nonExistentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Transaction?)null);
+
+        // Act
+        var act = () => _sut.ApproveAsync(nonExistentId, OperatorId, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task ApproveAsync_WithdrawalGatewaySuccess_DecreasesBalance()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer, balance: 1_000m);
+        var transaction = new Transaction
+        {
+            Id = Guid.NewGuid(),
+            PlayerId = PlayerId,
+            Type = TransactionType.Withdrawal,
+            Amount = 300m,
+            Status = TransactionStatus.Pending,
+            BalanceBefore = 1_000m,
+            RowVersion = [1]
+        };
+
+        _transactions.Setup(r => r.GetByIdAsync(transaction.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction);
+        _players.Setup(r => r.GetByIdAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(player);
+        _transactions.Setup(r => r.Update(It.IsAny<Transaction>()));
+        _players.Setup(r => r.Update(It.IsAny<Player>()));
+
+        _gateway.Setup(g => g.ProcessPaymentAsync(transaction.Id, 300m, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PaymentGatewayResult.Succeeded("PAY-WITHDRAW-001"));
+
+        // Act
+        var result = await _sut.ApproveAsync(transaction.Id, OperatorId, null);
+
+        // Assert
+        result.Status.Should().Be("Completed");
+        player.Balance.Should().Be(700m, "balance must decrease by the withdrawal amount");
+        _players.Verify(r => r.Update(player), Times.Once);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_GatewaySuccess_NotifiesPlayer()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        var transaction = MakePendingDeposit(200m, player.Id);
+
+        _transactions.Setup(r => r.GetByIdAsync(transaction.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction);
+        _players.Setup(r => r.GetByIdAsync(player.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(player);
+        _transactions.Setup(r => r.Update(It.IsAny<Transaction>()));
+        _players.Setup(r => r.Update(It.IsAny<Player>()));
+
+        _gateway.Setup(g => g.ProcessPaymentAsync(transaction.Id, 200m, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PaymentGatewayResult.Succeeded("PAY-NOTIFY-001"));
+
+        // Act
+        await _sut.ApproveAsync(transaction.Id, OperatorId, null);
+
+        // Assert
+        _notifications.Verify(n => n.CreateAsync(
+            PlayerId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_GatewayFailure_NotifiesPlayer()
+    {
+        // Arrange
+        var player = ClonePlayer(ActiveKycPlayer);
+        var transaction = MakePendingDeposit(200m, player.Id);
+
+        _transactions.Setup(r => r.GetByIdAsync(transaction.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction);
+        _players.Setup(r => r.GetByIdAsync(player.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(player);
+        _transactions.Setup(r => r.Update(It.IsAny<Transaction>()));
+
+        _gateway.Setup(g => g.ProcessPaymentAsync(transaction.Id, 200m, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PaymentGatewayResult.Failed("DECLINED", "Card declined by issuer."));
+
+        // Act
+        await _sut.ApproveAsync(transaction.Id, OperatorId, null);
+
+        // Assert
+        _notifications.Verify(n => n.CreateAsync(
+            PlayerId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_PlayerNotFound_CallsRollback()
+    {
+        // Arrange — transaction exists but player lookup fails
+        var transaction = MakePendingDeposit(200m, PlayerId);
+
+        _transactions.Setup(r => r.GetByIdAsync(transaction.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction);
+        _players.Setup(r => r.GetByIdAsync(PlayerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Player?)null);
+
+        // Act
+        var act = () => _sut.ApproveAsync(transaction.Id, OperatorId, null);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _uow.Verify(u => u.RollbackTransactionAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // REJECT — additional cases
+    // ═════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task RejectAsync_TransactionNotFound_Throws()
+    {
+        // Arrange
+        var nonExistentId = Guid.NewGuid();
+        _transactions.Setup(r => r.GetByIdAsync(nonExistentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Transaction?)null);
+
+        // Act
+        var act = () => _sut.RejectAsync(nonExistentId, OperatorId, "reason");
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task RejectAsync_ValidRejection_NotifiesPlayer()
+    {
+        // Arrange
+        var transaction = MakePendingDeposit(200m, PlayerId);
+
+        _transactions.Setup(r => r.GetByIdAsync(transaction.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(transaction);
+        _transactions.Setup(r => r.Update(It.IsAny<Transaction>()));
+
+        // Act
+        await _sut.RejectAsync(transaction.Id, OperatorId, "Insufficient documentation");
+
+        // Assert
+        _notifications.Verify(n => n.CreateAsync(
+            PlayerId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     // Helpers
     // ═════════════════════════════════════════════════════════════════════════
 

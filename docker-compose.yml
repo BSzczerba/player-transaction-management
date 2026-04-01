@@ -1,0 +1,42 @@
+services:
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "zaq1@WSX"
+      MSSQL_PID: Developer
+    ports:
+      - "1434:1433"
+    volumes:
+      - sqldata:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "zaq1@WSX" -Q "SELECT 1" -No
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5235:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: >-
+        Server=sqlserver,1433;Database=PlayerTransactionDB;
+        User Id=sa;Password=zaq1@WSX;
+        TrustServerCertificate=True;MultipleActiveResultSets=true
+      JwtSettings__SecretKey: "YourSuperSecretKeyForJWTTokenGenerationMustBeAtLeast32CharactersLong!"
+      JwtSettings__Issuer: "PlayerTransactionAPI"
+      JwtSettings__Audience: "PlayerTransactionClient"
+      JwtSettings__ExpirationMinutes: "60"
+      JwtSettings__RefreshTokenExpirationDays: "7"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+volumes:
+  sqldata:
