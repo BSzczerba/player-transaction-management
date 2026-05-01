@@ -411,15 +411,24 @@ public class TransactionService : ITransactionService
     }
 
     public async Task<PagedResult<TransactionDto>> GetByPlayerPagedAsync(
-        Guid playerId, int page, int pageSize, CancellationToken ct = default)
+        Guid playerId, PlayerTransactionFilterDto filter, CancellationToken ct = default)
     {
-        var filter = new TransactionFilterDto
+        var internalFilter = new TransactionFilterDto
         {
             PlayerId = playerId,
-            Page = page,
-            PageSize = pageSize
+            Type = filter.Type,
+            Status = filter.Status,
+            StartDate = filter.StartDate,
+            EndDate = filter.EndDate,
+            MinAmount = filter.MinAmount,
+            MaxAmount = filter.MaxAmount,
+            IsFlagged = filter.IsFlagged,
+            Page = filter.Page,
+            PageSize = filter.PageSize,
+            SortBy = filter.SortBy,
+            SortDir = filter.SortDir
         };
-        return await GetAllAsync(filter, ct);
+        return await GetAllAsync(internalFilter, ct);
     }
 
     public async Task<PagedResult<TransactionDto>> GetPendingAsync(int page = 1, int pageSize = 20, CancellationToken ct = default)

@@ -65,6 +65,26 @@ public class RejectTransactionDto
 }
 
 /// <summary>
+/// Filter DTO for the authenticated player's own transactions — PlayerId is injected server-side from JWT.
+/// </summary>
+public class PlayerTransactionFilterDto
+{
+    public TransactionType? Type { get; set; }
+    public TransactionStatus? Status { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public decimal? MinAmount { get; set; }
+    public decimal? MaxAmount { get; set; }
+    public bool? IsFlagged { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 20;
+    /// <summary>Allowed values: createdAt, amount, status, type</summary>
+    public string SortBy { get; set; } = "createdAt";
+    /// <summary>Allowed values: asc, desc</summary>
+    public string SortDir { get; set; } = "desc";
+}
+
+/// <summary>
 /// DTO for transaction filters
 /// </summary>
 public class TransactionFilterDto
@@ -79,6 +99,10 @@ public class TransactionFilterDto
     public bool? IsFlagged { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
+    /// <summary>Allowed values: createdAt, amount, status, type</summary>
+    public string SortBy { get; set; } = "createdAt";
+    /// <summary>Allowed values: asc, desc</summary>
+    public string SortDir { get; set; } = "desc";
 }
 
 /// <summary>

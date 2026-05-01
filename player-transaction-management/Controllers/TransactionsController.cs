@@ -61,12 +61,11 @@ public class TransactionsController : ControllerBase
     [HttpGet("my")]
     [ProducesResponseType(typeof(PagedResult<TransactionDto>), 200)]
     public async Task<IActionResult> GetMy(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
+        [FromQuery] PlayerTransactionFilterDto filter,
         CancellationToken ct = default)
     {
         var playerId = GetCurrentUserId();
-        var result = await _svc.GetByPlayerPagedAsync(playerId, page, pageSize, ct);
+        var result = await _svc.GetByPlayerPagedAsync(playerId, filter, ct);
         return Ok(result);
     }
 

@@ -9,7 +9,7 @@ namespace Application.Services.Interfaces
         Task<TransactionDto> ApproveAsync(Guid transactionId, Guid operatorId, string? notes, CancellationToken ct = default);
         Task<TransactionDto> RejectAsync(Guid transactionId, Guid operatorId, string reason, CancellationToken ct = default);
         Task<IEnumerable<TransactionDto>> GetByPlayerAsync(Guid playerId, CancellationToken ct = default);
-        Task<PagedResult<TransactionDto>> GetByPlayerPagedAsync(Guid playerId, int page, int pageSize, CancellationToken ct = default);
+        Task<PagedResult<TransactionDto>> GetByPlayerPagedAsync(Guid playerId, PlayerTransactionFilterDto filter, CancellationToken ct = default);
         Task<PagedResult<TransactionDto>> GetPendingAsync(int page = 1, int pageSize = 20, CancellationToken ct = default);
         Task<TransactionDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
         Task<PagedResult<TransactionDto>> GetAllAsync(TransactionFilterDto filter, CancellationToken ct = default);

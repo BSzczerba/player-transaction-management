@@ -112,8 +112,16 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
         var page = Math.Max(filter.Page, 1);
 
-        var items = await query
-            .OrderByDescending(t => t.CreatedAt)
+        bool descending = !string.Equals(filter.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
+        IOrderedQueryable<Transaction> ordered = filter.SortBy?.ToLowerInvariant() switch
+        {
+            "amount"    => descending ? query.OrderByDescending(t => t.Amount)    : query.OrderBy(t => t.Amount),
+            "status"    => descending ? query.OrderByDescending(t => t.Status)    : query.OrderBy(t => t.Status),
+            "type"      => descending ? query.OrderByDescending(t => t.Type)      : query.OrderBy(t => t.Type),
+            _           => descending ? query.OrderByDescending(t => t.CreatedAt) : query.OrderBy(t => t.CreatedAt),
+        };
+
+        var items = await ordered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
