@@ -201,7 +201,7 @@ Rate limited: **10 requests/minute**.
 |---|---|---|---|
 | GET | `/summary` | ComplianceOfficer, Admin | AML dashboard |
 | GET | `/flagged` | ComplianceOfficer, Admin | Flagged transactions |
-| GET | `/players/{id}/risk` | ComplianceOfficer, Admin | Player risk profile |
+| GET | `/players/{id}/risk` | ComplianceOfficer, Admin | Player risk profile with AML score (0–100) and signal breakdown |
 | POST | `/flagged/{id}/clear` | ComplianceOfficer, Admin | Clear AML flag |
 
 ### Admin (`/api/admin`)
@@ -252,6 +252,8 @@ Rate limited: **10 requests/minute**.
 | AML flag — velocity | 5+ transactions in rolling 24h window |
 | AML flag — single amount | > 10 000 |
 | AML flag — daily volume | > 20 000 |
+| AML score | 0–100 (Low: 0–20, Medium: 21–50, High: 51–75, Critical: 76–100) |
+| AML score signals | KYC missing, flag ratio, 24h/7d velocity, max single amount, daily volume |
 | Default daily deposit limit | 10 000 |
 | Default daily withdrawal limit | 5 000 |
 | Soft deletes | All entities (except `AuditLog` — permanent) |

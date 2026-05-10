@@ -107,6 +107,9 @@ public interface ITransactionRepository : IRepository<Transaction>
 
     /// <summary>All transactions matching the filter (no pagination — for CSV export, capped at 10 000 rows).</summary>
     Task<IEnumerable<Transaction>> GetAllForExportAsync(TransactionFilterDto filter, CancellationToken ct = default);
+
+    /// <summary>SQL-level aggregates required to compute a player's AML score.</summary>
+    Task<AmlScoreRawDto> GetAmlScoreRawAsync(Guid playerId, CancellationToken ct = default);
 }
 
 /// <summary>

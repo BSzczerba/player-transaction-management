@@ -283,6 +283,46 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
         });
     }
 
+    public async Task<AmlScoreRawDto> GetAmlScoreRawAsync(Guid playerId, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var threshold24h = now.AddHours(-24);
+        var threshold7d = now.AddDays(-7);
+        var today = now.Date;
+
+        var tx24h = await _dbSet
+            .AsNoTracking()
+            .CountAsync(t => t.PlayerId == playerId && t.CreatedAt >= threshold24h, ct);
+
+        var tx7d = await _dbSet
+            .AsNoTracking()
+            .CountAsync(t => t.PlayerId == playerId && t.CreatedAt >= threshold7d, ct);
+
+        var maxAmount = await _dbSet
+            .AsNoTracking()
+            .Where(t => t.PlayerId == playerId)
+            .Select(t => (decimal?)t.Amount)
+            .MaxAsync(ct) ?? 0m;
+
+        // Mirror the AML volume check in TransactionService: sum non-cancelled/failed/rejected tx today
+        var todayVolume = await _dbSet
+            .AsNoTracking()
+            .Where(t => t.PlayerId == playerId
+                     && t.CreatedAt >= today
+                     && t.Status != TransactionStatus.Failed
+                     && t.Status != TransactionStatus.Cancelled
+                     && t.Status != TransactionStatus.Rejected)
+            .SumAsync(t => (decimal?)t.Amount, ct) ?? 0m;
+
+        return new AmlScoreRawDto
+        {
+            Transactions24h = tx24h,
+            Transactions7d = tx7d,
+            MaxSingleTransactionAmount = maxAmount,
+            TodayVolume = todayVolume
+        };
+    }
+
     public async Task<IEnumerable<Transaction>> GetAllForExportAsync(
         TransactionFilterDto filter, CancellationToken ct = default)
     {
