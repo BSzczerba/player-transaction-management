@@ -1,6 +1,6 @@
 # Player Transaction Management API
 
-Enterprise-grade REST API for managing financial transactions on gaming platforms. Built with **ASP.NET Core 10**, **Entity Framework Core 10**, and **SQL Server**, following **Clean Architecture** principles.
+Hey! This is a REST API I built for managing transactions on a gaming platform, deposits and withdrawals for players, plus all the compliance stuff that comes with handling real money (AML checks, KYC, audit logs, that kind of thing). I wrote it with ASP.NET Core 10, EF Core 10 and SQL Server, and organized it using a Clean Architecture style split into layers.
 
 ![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)
 ![Build](https://github.com/BSzczerba/player-transaction-management/actions/workflows/ci.yml/badge.svg)
@@ -8,313 +8,188 @@ Enterprise-grade REST API for managing financial transactions on gaming platform
 
 ---
 
-## Features
+## What it does
 
-- **Authentication & Authorization** — JWT Bearer tokens, role-based access (Player, Operator, Administrator, ComplianceOfficer), refresh tokens, account activation
-- **Transaction Management** — Deposits & withdrawals with auto-approval rules, daily limits, optimistic concurrency
-- **AML / KYC Compliance** — Automatic AML flagging (velocity, single-amount, daily-volume rules), player risk profiling, compliance officer workflow
-- **Audit Trail** — Permanent, tamper-proof audit log for every state-changing operation
-- **Notifications** — In-app notification system; compliance officers notified on AML flag
-- **Payment Gateway Mock** — Realistic failure rates per payment method type, simulated latency, gateway reference IDs
-- **Reports & Analytics** — Financial summaries, player activity, payment method breakdown, CSV exports (up to 10 000 rows)
-- **Admin Panel** — Player limits, account status, role management, KYC verification
-- **Rate Limiting** — Auth endpoints: 10 req/min; API: 100 req/min
-- **Health Check** — `GET /health` (no auth required)
+I tried to cover most of the things you'd expect from a real transaction system, not just a basic CRUD app. Here's what's in there:
 
----
-
-## Architecture
-
-Clean Architecture with four layers (dependencies flow inward):
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  API Layer          Controllers, Middleware, Program.cs   │
-│  (player-transaction-management/)                         │
-├──────────────────────────────────────────────────────────┤
-│  Application Layer  Services, DTOs, Validators, Mappings  │
-│  (Application/)                                           │
-├──────────────────────────────────────────────────────────┤
-│  Infrastructure     EF Core, Repositories, Password Hash  │
-│  (Infrastructure/)                                        │
-├──────────────────────────────────────────────────────────┤
-│  Domain Layer       Entities, Enums (no dependencies)     │
-│  (Domain/)                                                │
-└──────────────────────────────────────────────────────────┘
-```
-
-**Key patterns:**
-- Repository + Unit of Work
-- Service layer with explicit DB transactions
-- AutoMapper (single `MappingProfile`)
-- FluentValidation (all validators in one file)
-- Global exception handler — controllers never use try/catch
-- Soft deletes with EF Core global query filters
-- Optimistic concurrency (`RowVersion`) on `Player` and `Transaction`
+* Login and registration with JWT tokens, refresh tokens and account activation. There are a few roles too: Player, Operator, Administrator and ComplianceOfficer, each with different permissions.
+* Deposits and withdrawals, with some auto-approval logic for small deposits and daily limits per player.
+* AML detection (flags suspicious activity, like too many transactions in a short time or a huge single amount) and a KYC verification flag on players.
+* An audit log that tracks every important action in the system, so nothing gets deleted for real, it's all soft deletes.
+* An in-app notification system, mostly used to ping compliance officers when something gets flagged.
+* A mocked payment gateway that simulates delays and random failures so it feels realistic, since there's no real payment provider hooked up here.
+* Some reporting endpoints and CSV exports for admins and operators.
+* An admin panel (well, admin endpoints, no UI) to manage player limits, suspend accounts, change roles, etc.
+* Rate limiting on the auth endpoints so people can't hammer login/register.
+* A simple health check endpoint too.
 
 ---
 
-## Tech Stack
+## Architecture (short version)
 
-| Component | Technology |
-|---|---|
-| Framework | ASP.NET Core 10.0 |
-| ORM | Entity Framework Core 10 + SQL Server |
-| Authentication | JWT Bearer (`Microsoft.AspNetCore.Authentication.JwtBearer`) |
-| Password hashing | BCrypt.Net-Next |
-| Mapping | AutoMapper 12 |
-| Validation | FluentValidation 11 |
-| Logging | Serilog (console + rolling file) |
-| API docs | Swashbuckle / Swagger |
-| Testing | xUnit + Moq + FluentAssertions |
-| Containerization | Docker + Docker Compose |
-| CI/CD | GitHub Actions |
+I split the project into a few layers, going API -> Application -> Infrastructure -> Domain, with the idea that the Domain layer (entities, enums) doesn't depend on anything else. The general idea is:
+
+* Controllers just handle HTTP stuff and call services, no business logic there.
+* Services in the Application layer hold the actual business logic (like the AML rules, approval flow, etc).
+* Infrastructure has the EF Core stuff, repositories, and things like password hashing.
+* Domain is just the entities and enums, nothing fancy.
+
+I also used the Repository + Unit of Work pattern, AutoMapper for mapping entities to DTOs, and FluentValidation for input validation. There's a global exception handler too, so controllers don't need try/catch everywhere, exceptions just get mapped to the right HTTP status code automatically.
 
 ---
 
-## Getting Started
+## Tech stack
 
-### Prerequisites
+* ASP.NET Core 10
+* Entity Framework Core 10 + SQL Server
+* JWT for authentication
+* BCrypt for password hashing
+* AutoMapper
+* FluentValidation
+* Serilog for logging
+* Swagger/Swashbuckle for API docs
+* xUnit + Moq + FluentAssertions for tests
+* Docker + Docker Compose
+* GitHub Actions for CI/CD
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- SQL Server on `localhost:1433` (credentials from `appsettings.json`), **or** Docker
+---
 
-### Option A — Run locally
+## How to run it
+
+You'll need the .NET 10 SDK, and either a local SQL Server instance or Docker (Docker is way easier).
+
+### Running it locally
+
+Clone the repo, then open it in Visual Studio, or just use the CLI:
 
 ```bash
-# 1. Clone
 git clone https://github.com/YOUR_USERNAME/player-transaction-management.git
 cd player-transaction-management
+```
 
-# 2. (Optional) override settings — never commit this file
-cp player-transaction-management/appsettings.json \
-   player-transaction-management/appsettings.Development.json
-# Edit appsettings.Development.json with your local SQL Server credentials
+If you need to override the connection string or JWT settings for your machine, copy `appsettings.json` into `appsettings.Development.json` and edit that one instead (it's git-ignored, so your local secrets won't get committed by accident).
 
-# 3. Install EF tools if needed
+You'll also need the EF tools if you don't already have them:
+
+```bash
 dotnet tool install --global dotnet-ef
+```
 
-# 4. Apply migrations
-dotnet ef database update --project Infrastructure \
-  --startup-project player-transaction-management
+Then run the migrations to get the database set up:
 
-# 5. Run (Swagger available at http://localhost:5235/swagger)
+```bash
+dotnet ef database update --project Infrastructure --startup-project player-transaction-management
+```
+
+And finally just odpalić the project:
+
+```bash
 dotnet run --project player-transaction-management
 ```
 
-In **Development** mode, migrations are applied and the database is seeded automatically on startup.
+Swagger UI should pop up at something like `http://localhost:5235/swagger` once it's running. In Development mode the app also seeds the database automatically on startup, so you'll already have some test accounts and data to play with.
 
-### Option B — Docker Compose (recommended)
+### Running it with Docker (probably the easier option)
 
 ```bash
-# 1. Copy the env template and fill in your secrets
 cp .env.example .env
-# Edit .env — set SA_PASSWORD and JWT_SECRET
+```
 
-# 2. Build and start API + SQL Server
+Then open `.env` and fill in your own values for the SQL Server password and JWT secret (there's a comment in the file explaining what's expected).
+
+```bash
 docker compose up --build
-
-# API:     http://localhost:5235
-# Swagger: http://localhost:5235/swagger
 ```
 
-The `api` container waits for SQL Server to pass its health check before starting. Migrations and seeding run automatically (the container uses `ASPNETCORE_ENVIRONMENT=Development`).
+That spins up both the API and a SQL Server container, and the API waits until the DB is actually ready before starting up. Migrations and seeding happen automatically here too.
 
-> **Note:** `.env` is git-ignored. Never commit it. See `.env.example` for the required variables.
-
-**Stop and clean up:**
-```bash
-docker compose down        # stop containers (data volume preserved)
-docker compose down -v     # stop + delete volume (fresh DB on next up)
-```
-
----
-
-## Running Tests
+To stop everything:
 
 ```bash
-# All unit tests
-dotnet test Tests/Tests.csproj --verbosity normal
-
-# With code coverage report
-dotnet test Tests/Tests.csproj \
-  --collect:"XPlat Code Coverage" \
-  --results-directory ./TestResults
+docker compose down
 ```
 
-The test suite (`Tests/Services/TransactionServiceTests.cs`) covers 40 scenarios:
-
-| Category | Tests |
-|---|---|
-| Deposit auto-approve | amount < 100, not AML-flagged |
-| Deposit manual approval | amount ≥ 100 |
-| AML detection | velocity (5+ in 24h), single amount > 10K, daily volume > 20K |
-| Daily limit enforcement | deposit and withdrawal limits |
-| Account rules | suspended account, KYC not verified |
-| Payment method rules | min/max amount |
-| Approve flow | gateway success → Completed, gateway failure → Failed |
-| Approve guards | own transaction, non-pending status |
-| Reject flow | happy path, non-pending guard |
-| Notifications | AML flag notifies all ComplianceOfficers |
+Add `-v` if you also want to wipe the database volume and start fresh next time.
 
 ---
 
-## API Reference
+## Running the tests
 
-### Authentication (`/api/auth`)
+```bash
+dotnet test Tests/Tests.csproj
+```
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| POST | `/register` | Public | Register new player account |
-| POST | `/login` | Public | Login, returns JWT + refresh token |
-| POST | `/refresh` | Public | Refresh access token |
-| POST | `/activate` | Public | Activate account via token |
-| GET | `/me` | Bearer | Current user profile |
-
-Rate limited: **10 requests/minute**.
-
-### Transactions (`/api/transactions`)
-
-| Method | Endpoint | Role | Description |
-|---|---|---|---|
-| POST | `/deposit` | Player | Create deposit |
-| POST | `/withdrawal` | Player | Create withdrawal (KYC required) |
-| GET | `/my` | Player | Own transaction history |
-| GET | `/{id}` | Player/Operator/Admin | Get by ID (404 for other player's txn) |
-| GET | `/pending` | Operator, Admin | Pending transactions |
-| GET | `/flagged` | Operator, Admin, ComplianceOfficer | AML-flagged transactions |
-| PUT | `/{id}/approve` | Operator, Admin | Approve → payment gateway |
-| PUT | `/{id}/reject` | Operator, Admin | Reject with reason |
-
-### Players (`/api/players`)
-
-| Method | Endpoint | Role | Description |
-|---|---|---|---|
-| GET | `/me` | Player | Own profile |
-| PUT | `/me` | Player | Update own profile |
-| GET | `/` | Admin | All players (paged) |
-| GET | `/{id}` | Admin | Player by ID |
-
-### Compliance (`/api/compliance`)
-
-| Method | Endpoint | Role | Description |
-|---|---|---|---|
-| GET | `/summary` | ComplianceOfficer, Admin | AML dashboard |
-| GET | `/flagged` | ComplianceOfficer, Admin | Flagged transactions |
-| GET | `/players/{id}/risk` | ComplianceOfficer, Admin | Player risk profile with AML score (0–100) and signal breakdown |
-| POST | `/flagged/{id}/clear` | ComplianceOfficer, Admin | Clear AML flag |
-
-### Admin (`/api/admin`)
-
-| Method | Endpoint | Role | Description |
-|---|---|---|---|
-| PUT | `/players/{id}/limits` | Admin | Update daily deposit/withdrawal limits |
-| POST | `/players/{id}/suspend` | Admin | Suspend account |
-| POST | `/players/{id}/activate` | Admin | Activate account |
-| POST | `/players/{id}/close` | Admin | Close account |
-| PUT | `/players/{id}/role` | Admin | Change user role |
-| POST | `/players/{id}/kyc` | Admin | Set KYC verification |
-| GET | `/audit-logs` | Admin | All audit logs (filtered, paged) |
-| GET | `/players/{id}/audit-logs` | Admin | Audit logs per player |
-
-### Reports (`/api/reports`)
-
-| Method | Endpoint | Role | Description |
-|---|---|---|---|
-| GET | `/financial-summary` | Admin, Operator | Deposits/withdrawals/net flow + period breakdown |
-| GET | `/players` | Admin | Player activity report |
-| GET | `/payment-methods` | Admin, Operator | Per-method stats |
-| GET | `/export/transactions` | Admin, Operator | CSV export (max 10 000 rows) |
-| GET | `/export/players` | Admin | Full player list CSV |
-
-### Other
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/api/notifications` | Bearer | Own notifications |
-| GET | `/api/notifications/unread` | Bearer | Unread notifications |
-| GET | `/api/notifications/unread/count` | Bearer | Unread count |
-| POST | `/api/notifications/{id}/read` | Bearer | Mark as read |
-| POST | `/api/notifications/read-all` | Bearer | Mark all as read |
-| GET | `/api/paymentmethods` | Bearer | Active payment methods |
-| GET | `/api/paymentmethods/{id}` | Bearer | Payment method by ID |
-| GET | `/health` | Public | Health check (DB connectivity) |
+There's a decent chunk of unit tests (around 40) covering the transaction service specifically, things like the auto-approval rules, AML flagging, daily limits, the approve/reject flow, and account/KYC checks. I used Moq to fake out the dependencies and FluentAssertions because the assertions read a lot nicer than plain xUnit asserts.
 
 ---
 
-## Business Rules
+## API overview
 
-| Rule | Value |
-|---|---|
-| Deposit auto-approve threshold | < 100 (and not AML-flagged) |
-| Deposits requiring manual approval | ≥ 100, or AML-flagged |
-| Withdrawals | Always manual approval + KYC required |
-| AML flag — velocity | 5+ transactions in rolling 24h window |
-| AML flag — single amount | > 10 000 |
-| AML flag — daily volume | > 20 000 |
-| AML score | 0–100 (Low: 0–20, Medium: 21–50, High: 51–75, Critical: 76–100) |
-| AML score signals | KYC missing, flag ratio, 24h/7d velocity, max single amount, daily volume |
-| Default daily deposit limit | 10 000 |
-| Default daily withdrawal limit | 5 000 |
-| Soft deletes | All entities (except `AuditLog` — permanent) |
-| Concurrent modification | HTTP 409 (`DbUpdateConcurrencyException`) |
-| IDOR protection | `GET /transactions/{id}` returns 404 for another player's txn |
+Quick rundown of the main endpoint groups, not every single detail but enough to get the idea:
+
+* `/api/auth` – register, login, refresh token, activate account, get current user. Public except for `/me`.
+* `/api/transactions` – deposit and withdraw (players only), view your own transactions, and for operators/admins there's approving, rejecting and listing pending or flagged transactions.
+* `/api/players` – players can view/edit their own profile, admins can list everyone.
+* `/api/compliance` – for compliance officers and admins, AML summary, flagged transactions, and a per-player risk profile with a computed AML score.
+* `/api/admin` – admin-only stuff like updating player limits, suspending/activating accounts, changing roles, KYC verification, and browsing audit logs.
+* `/api/reports` – financial summaries, player activity, payment method stats, and CSV exports.
+* `/api/notifications` and `/api/paymentmethods` – smaller endpoints for the logged-in user's own notifications and available payment methods.
+* `/health` – just a basic health check, no auth needed.
+
+The easiest way to explore all of this is just running the project and poking around in Swagger, it's a lot clearer than reading a table here.
+
+---
+
+## Business rules worth knowing
+
+Some of the logic that drives the whole thing:
+
+* Small deposits get auto-approved through the (mocked) payment gateway, bigger ones need a human (operator/admin) to approve them manually.
+* Withdrawals always need manual approval, and the player has to be KYC verified first.
+* If a player does a bunch of transactions in a short window, or one really big transaction, or their daily volume gets too high, the transaction gets flagged for AML review and compliance officers get notified.
+* Players also get an AML risk score out of 100, built from a handful of signals (KYC status, how often they get flagged, transaction velocity, biggest single amount, daily volume). Higher score = higher risk.
+* Everything uses soft deletes, nothing actually gets removed from the DB except the audit log is untouchable on purpose, it's meant to be a permanent record.
+* If two people try to update the same record at the same time, you'll get a 409 conflict instead of silently overwriting data (optimistic concurrency).
+* If you try to fetch a transaction that isn't yours, you get a 404 instead of a 403, so people can't even tell if the ID belongs to someone else.
 
 ---
 
 ## Configuration
 
-All settings are in `appsettings.json`. For local development, override in `appsettings.Development.json` (git-ignored).
-
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Server=localhost,1433;Database=PlayerTransactionDB;..."
-  },
-  "JwtSettings": {
-    "SecretKey": "...",
-    "Issuer": "PlayerTransactionAPI",
-    "Audience": "PlayerTransactionClient",
-    "ExpirationMinutes": 60,
-    "RefreshTokenExpirationDays": 7
-  }
-}
-```
-
-For Docker, settings are passed as environment variables using `__` as the section separator (e.g. `JwtSettings__SecretKey`).
+Most of the config lives in `appsettings.json` (connection string, JWT settings, that sort of thing). For local dev just override what you need in `appsettings.Development.json` instead of touching the main file. When running through Docker, the same settings get passed in as environment variables instead.
 
 ---
 
 ## CI/CD
 
-GitHub Actions pipeline (`.github/workflows/ci.yml`):
-
-1. **Build & Test** — runs on every push and PR to `main`
-   - `dotnet restore` → `dotnet build` → `dotnet test`
-   - Uploads test results and code coverage as artifacts
-
-2. **Docker Build & Push** — runs only on push to `main`
-   - Builds Docker image and pushes to Docker Hub
-   - Tags: `latest` + commit SHA
-
-To enable Docker Hub push, add repository secrets:
-- `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`
+There's a GitHub Actions workflow that runs the build and tests on every push/PR to main, and if it's a push to main it also builds and pushes a Docker image. Wanted to have a proper pipeline instead of testing everything by hand.
 
 ---
 
-## Seeded Test Accounts
+## Test accounts
 
-After first startup (Development mode), the database is seeded with:
+Once you run it in Development mode, the database gets seeded with a few test accounts (admin, operator, compliance officer, and a regular player) so you don't have to register manually just to try things out. These are dummy accounts, not meant for anything beyond local testing.
 
-| Role | Email | Password |
-|---|---|---|
-| Administrator | `admin@test.com` | `TestPass123!` |
-| Operator | `operator@test.com` | `TestPass123!` |
-| ComplianceOfficer | `compliance@test.com` | `TestPass123!` |
-| Player | `player@test.com` | `TestPass123!` |
+---
 
-> **Note:** These credentials are for development/demo purposes only.
+## What I'd do differently now
+
+Looking back at this after working on it for a while, a few things I'd approach differently if I started over:
+
+* Use CQRS with MediatR instead of the Services + Repository/Unit of Work combo. The service layer works fine, but for something this transaction-heavy, splitting reads and writes into separate commands/queries would probably make the intent of each operation clearer.
+* Write actual integration tests against a real (containerized) database using Testcontainers, instead of relying only on unit tests with mocked repositories. Unit tests caught a lot, but they don't tell you if the EF configurations or the transaction handling actually work against SQL Server.
+* Focus on fewer features but go deeper on them. I added a lot of breadth (reports, notifications, compliance scoring, admin tools) and in hindsight I'd rather have picked two or three of those and really hardened them instead. I'm actually in the process of trimming things down now.
+
+## What's intentionally missing
+
+Some things aren't in the API on purpose, either because they were out of scope for a solo backend project or because I ran out of time before I wanted to ship this:
+
+* No frontend. This was originally planned with a Nuxt.js/Vue client, but I decided to keep the scope to the backend and just expose everything through Swagger.
+* No real email sending. Notifications are stored in the database and exposed through the API, but there's no actual email provider wired up, that was on the original plan but got cut.
+* No PDF/Excel export, only CSV. Good enough to prove the reporting logic works without pulling in a whole reporting library.
+* No Kubernetes manifests, it just runs via Docker Compose. K8s was on the original roadmap but felt like overkill for a project this size.
+* No real payment gateway integration, it's mocked. Wiring up an actual provider (Stripe, PayPal, whatever) wasn't the point here, the interesting part was the business logic around approvals and AML, not the payment processing itself.
+* No API versioning yet. Fine for now since there's only one client (Swagger/whoever's testing it), but it'd need to be added before any real frontend depended on it.
 
 ---
 
