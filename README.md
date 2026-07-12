@@ -188,7 +188,7 @@ Some things aren't in the API on purpose, either because they were out of scope 
 * No PDF/Excel export, only CSV. Good enough to prove the reporting logic works without pulling in a whole reporting library.
 * No Kubernetes manifests, it just runs via Docker Compose. K8s was on the original roadmap but felt like overkill for a project this size.
 * No real payment gateway integration, it's mocked. Wiring up an actual provider (Stripe, PayPal, whatever) wasn't the point here, the interesting part was the business logic around approvals and AML, not the payment processing itself.
-* No API versioning yet. Fine for now since there's only one client (Swagger/whoever's testing it), but it'd need to be added before any real frontend depended on it.
+* No API versioning yet. Fine for now since there's only one client (Swagger/whoever's testing it).
 
 ---
 
