@@ -63,7 +63,7 @@ You'll need the .NET 10 SDK, and either a local SQL Server instance or Docker (D
 Clone the repo, then open it in Visual Studio, or just use the CLI:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/player-transaction-management.git
+git clone https://github.com/BSzczerba/player-transaction-management.git
 cd player-transaction-management
 ```
 
@@ -184,7 +184,6 @@ Looking back at this after working on it for a while, a few things I'd approach 
 
 Some things aren't in the API on purpose, either because they were out of scope for a solo backend project or because I ran out of time before I wanted to ship this:
 
-* No frontend. This was originally planned with a Nuxt.js/Vue client, but I decided to keep the scope to the backend and just expose everything through Swagger.
 * No real email sending. Notifications are stored in the database and exposed through the API, but there's no actual email provider wired up, that was on the original plan but got cut.
 * No PDF/Excel export, only CSV. Good enough to prove the reporting logic works without pulling in a whole reporting library.
 * No Kubernetes manifests, it just runs via Docker Compose. K8s was on the original roadmap but felt like overkill for a project this size.
