@@ -35,6 +35,8 @@ public class CreateDepositTests : TransactionServiceTestBase
         result.Amount.Should().Be(50m);
         result.IsFlagged.Should().BeFalse();
         result.BalanceAfter.Should().Be(initialBalance + 50m);
+        player.Balance.Should().Be(initialBalance + 50m, "the player entity itself must be updated, not just the returned DTO");
+        _players.Verify(r => r.Update(player), Times.Once);
     }
 
     [Fact]
@@ -112,6 +114,7 @@ public class CreateDepositTests : TransactionServiceTestBase
             .ReturnsAsync([]);
 
         var dto = new CreateDepositDto { Amount = 20m, PaymentMethodId = PaymentMethodId };
+        var balanceBefore = player.Balance;
 
         // Act
         var result = await _sut.CreateDepositAsync(PlayerId, dto, null);
@@ -119,7 +122,8 @@ public class CreateDepositTests : TransactionServiceTestBase
         // Assert
         result.IsFlagged.Should().BeTrue();
         result.FlagReason.Should().Contain("velocity");
-        result.Status.Should().Be("Pending");
+        result.Status.Should().Be("Pending"); // NOT auto-approved despite amount < 100
+        player.Balance.Should().Be(balanceBefore, "balance must not be updated for a flagged pending transaction");
     }
 
     [Fact]
@@ -374,44 +378,6 @@ public class CreateDepositTests : TransactionServiceTestBase
     // ═════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task CreateDepositAsync_AmlFlagged_BelowAutoApproveThreshold_StillPending()
-    {
-        // AML flag must prevent auto-approve even when amount < 100
-        // Arrange
-        var player = ClonePlayer(ActiveKycPlayer);
-        SetupPlayerRepo(player);
-        SetupPaymentMethodRepo(CreditCardMethod);
-
-        var recentTxns = Enumerable.Range(0, 5)
-            .Select(_ => new Transaction
-            {
-                Amount = 20m, Type = TransactionType.Deposit,
-                Status = TransactionStatus.Completed, PlayerId = PlayerId
-            })
-            .ToList();
-
-        _transactions.Setup(r => r.GetLast24HoursTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(recentTxns);
-        _transactions.Setup(r => r.GetTodaysTransactionsByPlayerAsync(PlayerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(recentTxns);
-        _transactions.Setup(r => r.AddAsync(It.IsAny<Transaction>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Transaction t, CancellationToken _) => t);
-        _uow.Setup(u => u.Players.GetByRoleAsync(UserRole.ComplianceOfficer, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([]);
-
-        var dto = new CreateDepositDto { Amount = 20m, PaymentMethodId = PaymentMethodId };
-        var balanceBefore = player.Balance;
-
-        // Act
-        var result = await _sut.CreateDepositAsync(PlayerId, dto, null);
-
-        // Assert
-        result.IsFlagged.Should().BeTrue();
-        result.Status.Should().Be("Pending"); // NOT auto-approved despite amount < 100
-        player.Balance.Should().Be(balanceBefore, "balance must not be updated for a flagged pending transaction");
-    }
-
-    [Fact]
     public async Task CreateDepositAsync_ExactlyAtAmlSingleAmountThreshold_DoesNotFlag()
     {
         // 10 000 exactly must NOT trigger AML — the guard is strictly >, not >=
@@ -433,26 +399,6 @@ public class CreateDepositTests : TransactionServiceTestBase
         // Assert
         result.IsFlagged.Should().BeFalse();
         result.FlagReason.Should().BeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task CreateDepositAsync_AutoApproved_UpdatesPlayerBalance()
-    {
-        // Arrange
-        var player = ClonePlayer(ActiveKycPlayer);
-        var balanceBefore = player.Balance;
-        SetupPlayerRepo(player);
-        SetupPaymentMethodRepo(CreditCardMethod);
-        SetupEmptyTransactionHistory();
-
-        var dto = new CreateDepositDto { Amount = 50m, PaymentMethodId = PaymentMethodId };
-
-        // Act
-        await _sut.CreateDepositAsync(PlayerId, dto, null);
-
-        // Assert
-        player.Balance.Should().Be(balanceBefore + 50m);
-        _players.Verify(r => r.Update(player), Times.Once);
     }
 
     [Fact]

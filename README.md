@@ -119,7 +119,7 @@ Add `-v` if you also want to wipe the database volume and start fresh next time.
 dotnet test Tests/Tests.csproj
 ```
 
-There's a decent chunk of unit tests (around 40) covering the transaction service specifically, things like the auto-approval rules, AML flagging, daily limits, the approve/reject flow, and account/KYC checks. I used Moq to fake out the dependencies and FluentAssertions because the assertions read a lot nicer than plain xUnit asserts.
+There's a decent chunk of unit tests (around 50) covering the transaction service specifically, things like the auto-approval rules, AML flagging, daily limits, the approve/reject flow, and account/KYC checks. I used Moq to fake out the dependencies and FluentAssertions because the assertions read a lot nicer than plain xUnit asserts.
 
 ---
 
